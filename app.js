@@ -8,7 +8,7 @@
     low: { p: .36, win: .22, stop: .08, history: 100, wins: 36, states: [{ p: .44, win: .27, loss: .07, stay: .8 }, { p: .35, win: .22, loss: .08, stay: .72 }, { p: .25, win: .16, loss: .1, stay: .84 }] },
     over: { p: .6, win: .08, stop: .1, history: 20, wins: 15, states: [{ p: .58, win: .11, loss: .09, stay: .8 }, { p: .48, win: .08, loss: .1, stay: .72 }, { p: .35, win: .06, loss: .13, stay: .88 }] }
   };
-  let config = structuredClone(defaults), results = null, heatData = null, scale = "log", metric = "growth", hover = null, timer = null;
+  let config = structuredClone(defaults), results = null, heatData = null, scale = "log", metric = "growth", hover = null, timer = null, focused = "full";
   const visibility = Object.fromEntries(S.strategies.map(x => [x.id, true]));
   const percent = v => `${(v * 100).toFixed(1)}%`;
   const money = v => !Number.isFinite(v) ? "—" : v >= Math.exp(700) ? "≥¥1.01×10³⁰⁴" : v >= 1e12 ? `¥${v.toExponential(2)}` : `¥${v.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}`;
@@ -61,12 +61,12 @@
     heatData = S.sensitivity(config, metric);
     notice.className = "notice";
     const messages = [];
-    if (results.theoretical <= 0) messages.push("扣除执行成本后当前估计无正优势，凯利仓位为 0；固定风险 1% 与满仓仍承担风险。");
+    if (results.reference.practical <= 0) messages.push("扣除执行成本后当前估计无正优势，实际凯利仓位为 0；固定风险 1% 与满仓仍承担风险。");
     if (config.cost >= (config.mode === "market" ? Math.min(...config.states.map(s => s.win)) : config.win) * (1 - config.variation)) messages.push("部分盈利交易的毛收益可能低于往返成本，扣费后也可能出现净亏损。");
     if (config.trades === 0) messages.push("交易次数为 0，各策略资金保持初始值，回撤为 0。");
     if (results.theoreticalAllocation > 1) messages.push("理论凯利买入占比超过 100%，普通策略按无杠杆上限和计划风险上限收敛。");
     if (config.mode === "market" && config.states.some((_, i) => S.reference(config, i).allocation === 0)) messages.push("部分市场状态扣费后无正优势，该状态凯利仓位为 0。");
-    if (results.theoretical * config.superMultiplier > config.cap) messages.push("超凯利仓位可能触及计划账户风险上限。");
+    if (results.reference.practical * results.reference.loss * config.superMultiplier > config.cap) messages.push("超凯利仓位可能触及计划账户风险上限。");
     if (config.trailCoverage > 0 && config.mode !== "market" && config.tightStop >= config.stop) messages.push("收紧后亏损不小于计划止损，动态止损不会减少这类亏损。");
     if (results.strategies.some(s => s.clipped)) messages.push("极端路径的图表金额已截断显示；回撤仍按对数资金计算。");
     notice.textContent = messages.join(" ") || "七种策略使用相同净涨跌幅；固定种子可复现。实际亏损可因滑点超出计划风险。";
@@ -75,28 +75,31 @@
   }
   function render() {
     const ref = results.reference;
-    const fullAllocation = S.allocation({ id: "full", factor: 1 }, { estimated: ref.allocation, estimatedLoss: ref.loss }, config);
+    const fullAllocation = S.allocation({ id: "full", factor: 1 }, { estimated: ref.practical, estimatedLoss: ref.loss }, config);
     $("kellyValue").textContent = percent(results.theoretical);
-    $("kellyContext").textContent = `理论买入 ${percent(ref.allocation)} · 实际全凯利买入 ${percent(fullAllocation)}${config.mode === "estimate" ? " · 按历史估计" : config.mode === "market" ? " · 普通状态" : ""}`;
+    $("kellyContext").textContent = `二点公式买入 ${percent(ref.allocation)} · 波动分布最优买入 ${percent(ref.practical)} · 实际全凯利买入 ${percent(fullAllocation)}${config.mode === "estimate" ? " · 按历史估计" : config.mode === "market" ? " · 普通状态" : ""}`;
     $("posterior").classList.toggle("hidden", config.mode !== "estimate");
     if (config.mode === "estimate") $("posterior").innerHTML = `胜率后验 Beta(${ref.posterior.a}, ${ref.posterior.b})<br><strong>估计 ${percent(ref.p)}</strong> · 95% 可信区间 ${percent(ref.posterior.low)}–${percent(ref.posterior.high)}`;
     $("runCount").textContent = `${config.runs} 次`;
     $("summaryBody").innerHTML = results.strategies.map(r => `<tr><td><i class="strategy-dot" style="--color:${r.color}"></i>${r.name}</td><td>${money(r.q50)}</td><td><span class="stat-pair">${percent(r.dd50)}<small>${percent(r.dd95)}</small></span></td><td><span class="stat-pair">${percent(r.halfRate)}<small>${percent(r.ruinRate)}</small></span></td></tr>`).join("");
-    $("legend").innerHTML = results.strategies.map(r => `<button type="button" data-strategy="${r.id}" class="${visibility[r.id] ? "" : "off"}" aria-pressed="${visibility[r.id]}"><i style="--color:${r.color}"></i>${r.name}</button>`).join("");
+    $("legend").innerHTML = results.strategies.map(r => `<button type="button" data-strategy="${r.id}" class="${visibility[r.id] ? "" : "off"} ${focused === r.id ? "focused" : ""}" aria-pressed="${visibility[r.id]}" title="显示或隐藏${r.name}"><svg width="25" height="8" aria-hidden="true"><line x1="1" y1="4" x2="24" y2="4" stroke="${r.color}" stroke-width="3" ${r.dash.length ? `stroke-dasharray="${r.dash.join(" ")}"` : ""}/></svg>${r.name}</button>`).join("");
     $("legend").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { visibility[b.dataset.strategy] = !visibility[b.dataset.strategy]; renderPathCharts(); renderLegend(); }));
     const gross = config.mode === "market" ? config.states[1] : { win: config.win, loss: config.stop };
     $("workedExample").textContent = `当前参照：胜率 ${percent(ref.p)}，平均盈利 ${percent(gross.win)}，计划亏损 ${percent(gross.loss)}，毛盈亏比 ${(gross.win / gross.loss).toFixed(2)}。计入止损收紧、预期滑点和成本后，估计单笔净盈利 ${percent(ref.gain)}、平均净亏损 ${percent(ref.loss)}。`;
-    $("positionExample").textContent = `全凯利理论买入占比 ${percent(ref.allocation)}，理论账户风险 ${percent(ref.risk)}；按 100% 无杠杆仓位及 ${percent(config.cap)} 计划风险上限，当前实际买入 ${percent(fullAllocation)}。满仓时标的净跌 10%，账户约跌 10%；止损滑点可使亏损扩大。`;
+    $("positionExample").textContent = `仓位是买入金额占账户资金比例。二点公式对应账户风险 ${percent(ref.risk)}；实际按波动分布定仓，再受 ${percent(config.cap)} 计划风险上限约束，当前全凯利买入 ${percent(fullAllocation)}。满仓时标的净跌 10%，账户约跌 10%；滑点可使亏损扩大。`;
+    $("pathInsight").textContent = config.trades ? `首条路径：${config.trades} 笔中判定盈利 ${results.exampleWins} 笔（${percent(results.exampleWins / config.trades)}），最长连续亏损 ${results.exampleLongestLoss} 笔。${config.mode === "market" ? "状态有持续性，可能出现连续逆风。" : config.mode === "estimate" ? "本路径真实胜率由后验抽取后固定。" : "每笔输赢独立抽样，连续亏损仍可能发生。"} 当前参照假设每笔持仓净涨跌的均值约 ${percent(ref.p * ref.gain - (1 - ref.p) * ref.loss)}；若优势不能长期维持，复利曲线会明显改变。` : "零交易：资金保持初始值。";
+    $("focusStrategy").innerHTML = results.strategies.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+    $("focusStrategy").value = focused;
     $("growthBest").textContent = results.growth.sampleCount ? `样本内峰值 ${percent(results.growth.best.allocation)} 仓位` : "暂无交易样本";
     $("growthMethod").textContent = `按同批模拟结果中 ${results.growth.sampleCount.toLocaleString("zh-CN")} 笔持仓净涨跌幅计算${config.trades * config.runs > 50000 ? "（随机抽样）" : ""}；含止损、滑点和成本。青绿虚线为样本峰值，红色虚线为${config.mode === "market" ? "示例路径首笔" : "当前"}全凯利受约束后的买入占比。${ref.allocation > 1 ? "按平均盈亏计算的无约束凯利买入占比超出无杠杆范围，图中 0–100% 区间可能持续上升。" : ""}`;
     $("heatDescription").textContent = config.mode === "market" ? "以普通状态及当前执行假设为参照，横轴按全凯利估计仓位" : "以当前盈亏幅度、动态止损、滑点和成本为参照，横轴按全凯利估计仓位";
     $("heatLegend").innerHTML = `<div class="heat-legend"></div><div class="heat-legend-label"><span>${metric === "growth" ? "较低增长" : "较高风险"}</span><span>${metric === "growth" ? "较高增长" : "较低风险"}</span></div>`;
     renderCharts();
   }
-  function renderLegend() { $("legend").querySelectorAll("button").forEach(b => { b.classList.toggle("off", !visibility[b.dataset.strategy]); b.setAttribute("aria-pressed", visibility[b.dataset.strategy]); }); }
+  function renderLegend() { $("legend").querySelectorAll("button").forEach(b => { b.classList.toggle("off", !visibility[b.dataset.strategy]); b.classList.toggle("focused", focused === b.dataset.strategy); b.setAttribute("aria-pressed", visibility[b.dataset.strategy]); }); }
   function renderPathCharts() {
     if (!results) return;
-    const rows = results.strategies.map(r => ({ ...r, visible: visibility[r.id] }));
+    const rows = results.strategies.map(r => ({ ...r, visible: visibility[r.id], focused: focused === r.id }));
     C.lineChart($("equityChart"), rows, config, "equity", scale, hover);
     C.lineChart($("riskChart"), rows, config, "risk", scale, hover);
     C.lineChart($("drawdownChart"), rows, config, "drawdown", scale, hover);
@@ -107,9 +110,17 @@
   function renderCharts() {
     renderPathCharts();
     C.distribution($("distributionChart"), results.strategies, config.initial);
+    renderHistogram();
     const full = results.strategies.find(r => r.id === "full");
     C.growthChart($("growthChart"), results.growth, { full: full.example[config.trades ? 1 : 0].f });
     C.heatmap($("heatChart"), heatData, metric);
+  }
+  function renderHistogram() {
+    if (!results) return;
+    const strategy = results.strategies.find(r => r.id === focused), data = S.finalHistogram(strategy.finals, config.initial);
+    C.histogram($("histogramChart"), data, strategy.color, config.initial);
+    $("histogramCount").textContent = `${strategy.name} · ${data.total} 次`;
+    $("histogramNote").textContent = `最终金额为零或数值下溢 ${data.zero} 次（${percent(data.zero / data.total)}）；绘图区间外较低 ${data.leftTail} 次、较高 ${data.rightTail} 次，均计入统计。柱状图按最终资金的对数等宽分组；对数正态线仅对正资金样本做矩估计，并按全部模拟次数缩放，不包含零值。全部路径都计入，未剔除失败样本。`;
   }
   function showTip(event) {
     if (!results) return;
@@ -131,8 +142,9 @@
   $("modeTabs").addEventListener("click", e => { const m = e.target.dataset.mode; if (!m) return; config.mode = m; buildFields(); update(); });
   $("scaleTabs").addEventListener("click", e => { const s = e.target.dataset.scale; if (!s) return; scale = s; $("scaleTabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.scale === s)); renderCharts(); });
   $("heatMetric").addEventListener("change", e => { metric = e.target.value; heatData = S.sensitivity(config, metric); render(); });
+  $("focusStrategy").addEventListener("change", e => { focused = e.target.value; renderLegend(); renderPathCharts(); renderHistogram(); });
   $("preset").addEventListener("change", e => { if (e.target.value === "custom") return; const p = presets[e.target.value]; Object.assign(config, structuredClone(p)); config.b = config.win / config.stop; buildFields(); update(); });
-  $("reset").addEventListener("click", () => { config = structuredClone(defaults); scale = "log"; metric = "growth"; hover = null; Object.keys(visibility).forEach(k => visibility[k] = true); $("preset").value = "custom"; $("heatMetric").value = "growth"; $("scaleTabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.scale === "log")); buildFields(); update(); });
+  $("reset").addEventListener("click", () => { config = structuredClone(defaults); scale = "log"; metric = "growth"; hover = null; focused = "full"; Object.keys(visibility).forEach(k => visibility[k] = true); $("preset").value = "custom"; $("heatMetric").value = "growth"; $("scaleTabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.scale === "log")); buildFields(); update(); });
   ["equityChart", "riskChart"].forEach(id => { $(id).addEventListener("mousemove", showTip); $(id).addEventListener("mouseleave", hideTip); });
   window.addEventListener("resize", () => { clearTimeout(timer); timer = setTimeout(renderCharts, 70); });
   buildFields(); update();

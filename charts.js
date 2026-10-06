@@ -35,7 +35,7 @@
     for (let i = 0; i <= 4; i++) { const frac = 1 - i / 4; const val = kind === "equity" && scale === "log" ? Math.exp(lo + frac * (hi - lo)) : min + frac * (max - min); text(ctx, kind === "equity" ? fmt(val) : `${(val * 100).toFixed(0)}%`, left - 8, top + i * (bottom - top) / 4 + 3, "right"); }
     for (let i = 0; i <= 4; i++) text(ctx, String(Math.round(trades * i / 4)), xp(trades * i / 4), h - 8, "center");
     if (kind === "equity") { ctx.strokeStyle = "#b6c9c0"; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(left, yp(config.initial)); ctx.lineTo(right, yp(config.initial)); ctx.stroke(); ctx.setLineDash([]); }
-    active.forEach(r => { ctx.strokeStyle = r.color; ctx.lineWidth = 1.8; drawSeries(ctx, r.example, kind, xp, yp, right - left); });
+    active.filter(r => !r.focused).concat(active.filter(r => r.focused)).forEach(r => { ctx.strokeStyle = r.color; ctx.globalAlpha = r.focused ? 1 : .66; ctx.lineWidth = r.focused ? 3 : 1.65; ctx.setLineDash(r.dash || []); drawSeries(ctx, r.example, kind, xp, yp, right - left); ctx.setLineDash([]); ctx.globalAlpha = 1; });
     if (hover !== null && hover !== undefined) { const x = xp(hover); ctx.strokeStyle = "#6b817e"; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.setLineDash([]); active.forEach(r => { const d = r.example[hover]; if (!d) return; ctx.fillStyle = r.color; ctx.beginPath(); ctx.arc(x, yp(kind === "equity" ? d.wealth : kind === "risk" ? d.f : d.drawdown), 3.5, 0, Math.PI * 2); ctx.fill(); }); }
     return { left, right, trades };
   }
@@ -56,6 +56,24 @@
       [r.q05, r.q50, r.q95].forEach((v, i) => { ctx.fillStyle = i === 1 ? "#fff" : r.color; ctx.strokeStyle = r.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(xp(v), y, i === 1 ? 5 : 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
     });
     text(ctx, "最终资金 · 对数横轴", right, 13, "right");
+  }
+  function histogram(canvas, data, color, initial) {
+    const { ctx, w, h } = setup(canvas), left = 54, right = w - 18, top = 25, bottom = h - 34;
+    grid(ctx, left, top, right, bottom);
+    if (!data.bars.length) { text(ctx, "无正资金结果；归零次数见图下说明", left + 12, (top + bottom) / 2); return; }
+    const max = Math.max(.05, ...data.bars.map(x => x.probability), ...data.smooth.map(x => x.probability), ...data.lognormal.map(x => x.probability)) * 1.18;
+    const xp = x => left + (x - data.lo) / (data.hi - data.lo) * (right - left);
+    const yp = p => bottom - p / max * (bottom - top);
+    for (let i = 0; i <= 4; i++) { const multiple = Math.exp(data.lo + i * (data.hi - data.lo) / 4); text(ctx, `${(max * (4 - i) / 4 * 100).toFixed(0)}%`, left - 7, top + i * (bottom - top) / 4 + 3, "right"); text(ctx, `${multiple >= 1e4 || multiple < .01 ? multiple.toExponential(1) : multiple.toFixed(1)}×`, xp(data.lo + i * (data.hi - data.lo) / 4), h - 10, "center"); }
+    const bw = (right - left) / data.bars.length;
+    data.bars.forEach((bar, i) => { ctx.fillStyle = color + "9c"; ctx.fillRect(left + i * bw + 1, yp(bar.probability), Math.max(1, bw - 2), bottom - yp(bar.probability)); });
+    ctx.strokeStyle = "#142b34"; ctx.lineWidth = 2.4; ctx.beginPath();
+    data.smooth.forEach((point, i) => i ? ctx.lineTo(xp(point.x), yp(point.probability)) : ctx.moveTo(xp(point.x), yp(point.probability)));
+    ctx.stroke();
+    if (data.lognormal.length) { ctx.strokeStyle = "#8a4bb0"; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.beginPath(); data.lognormal.forEach((point, i) => i ? ctx.lineTo(xp(point.x), yp(point.probability)) : ctx.moveTo(xp(point.x), yp(point.probability))); ctx.stroke(); ctx.setLineDash([]); }
+    if (data.lo < 0 && data.hi > 0) { ctx.strokeStyle = "#788a8d"; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(xp(0), top); ctx.lineTo(xp(0), bottom); ctx.stroke(); ctx.setLineDash([]); }
+    text(ctx, "每个区间的模拟比例", left, 14);
+    text(ctx, "最终资金 / 初始资金 · 对数横轴", right, 14, "right");
   }
   function growthChart(canvas, data, markers) {
     const { ctx, w, h } = setup(canvas), left = 61, right = w - 22, top = 21, bottom = h - 33;
@@ -100,5 +118,5 @@
     for (let i = 0; i <= 10; i += 2) { const p = data.pMin + (data.pMax - data.pMin) * i / 10; text(ctx, `${(p * 100).toFixed(0)}%`, left + (i + .5) * cw, h - 7, "center", "#68787b", 9); const q = data.pMax - (data.pMax - data.pMin) * i / 10; text(ctx, `${(q * 100).toFixed(0)}%`, left - 4, top + (i + .5) * ch + 3, "right", "#68787b", 9); }
     return { left, top, cw, ch };
   }
-  root.KellyCharts = { lineChart, distribution, growthChart, heatmap };
+  root.KellyCharts = { lineChart, distribution, histogram, growthChart, heatmap };
 })(window);

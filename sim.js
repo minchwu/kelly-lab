@@ -11,14 +11,41 @@
     return sorted[i] + (sorted[Math.min(i + 1, sorted.length - 1)] - sorted[i]) * (index - i);
   }
   const strategies = [
-    { id: "fixed", name: "固定风险 1%", factor: null, color: "#54717c" },
-    { id: "eighth", name: "1/8 凯利", factor: .125, color: "#78a99b" },
-    { id: "quarter", name: "1/4 凯利", factor: .25, color: "#4a8d81" },
-    { id: "half", name: "半凯利", factor: .5, color: "#d39a3e" },
-    { id: "full", name: "全凯利", factor: 1, color: "#c95752" },
-    { id: "super", name: "超凯利", factor: "super", color: "#974b70" },
-    { id: "allin", name: "100% 满仓", factor: "allin", color: "#303f49" }
+    { id: "fixed", name: "固定风险 1%", factor: null, color: "#246b9b", dash: [] },
+    { id: "eighth", name: "1/8 凯利", factor: .125, color: "#57a6bd", dash: [3, 4] },
+    { id: "quarter", name: "1/4 凯利", factor: .25, color: "#147d69", dash: [9, 4] },
+    { id: "half", name: "半凯利", factor: .5, color: "#b67500", dash: [11, 3, 2, 3] },
+    { id: "full", name: "全凯利", factor: 1, color: "#c33e3e", dash: [] },
+    { id: "super", name: "超凯利", factor: "super", color: "#8a4bb0", dash: [6, 3] },
+    { id: "allin", name: "100% 满仓", factor: "allin", color: "#253644", dash: [2, 3] }
   ];
+  // Deterministic midpoint quadrature mirrors drawOutcome's bounded variation,
+  // tightened-stop mixture, slippage and cost; no future outcome enters sizing.
+  function outcomeGrid(config, state) {
+    const wins = [], losses = [], n = 9, slipSteps = 5;
+    for (let i = 0; i < n; i++) {
+      const variation = 1 + (2 * (i + .5) / n - 1) * config.variation;
+      wins.push({ r: Math.max(-1, state.win * variation - config.cost), weight: 1 / n });
+      for (let j = 0; j < slipSteps; j++) {
+        const slip = (j + .5) / slipSteps * config.slippage;
+        losses.push({ r: -Math.min(1, state.loss * variation + slip + config.cost), weight: (1 - config.trailCoverage) / (n * slipSteps) });
+        for (let k = 0; k < n; k++) {
+          const tightVariation = 1 + (2 * (k + .5) / n - 1) * config.variation;
+          const tight = Math.min(state.loss * variation, config.tightStop * tightVariation);
+          losses.push({ r: -Math.min(1, tight + slip + config.cost), weight: config.trailCoverage / (n * n * slipSteps) });
+        }
+      }
+    }
+    return { wins, losses };
+  }
+  function practicalKelly(p, grid) {
+    const derivative = amount => p * grid.wins.reduce((sum, x) => sum + x.weight * x.r / (1 + amount * x.r), 0) + (1 - p) * grid.losses.reduce((sum, x) => sum + x.weight * x.r / (1 + amount * x.r), 0);
+    if (derivative(0) <= 0) return 0;
+    if (derivative(1 - 1e-12) >= 0) return 1;
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 42; i++) { const mid = (lo + hi) / 2; if (derivative(mid) > 0) lo = mid; else hi = mid; }
+    return (lo + hi) / 2;
+  }
   function stateParams(config, stateIndex = 1) {
     return config.mode === "market" ? config.states[stateIndex] : { p: config.p, win: config.win, loss: config.stop };
   }
@@ -34,7 +61,8 @@
     const gain = state.win - config.cost;
     const loss = state.loss * (1 - config.trailCoverage) + tight * config.trailCoverage + config.slippage / 2 + config.cost;
     const allocation = kelly(p, gain, loss);
-    return { p, gain, loss, b: gain > 0 ? gain / loss : 0, allocation, risk: allocation * loss, posterior };
+    const practical = practicalKelly(p, outcomeGrid(config, state));
+    return { p, gain, loss, b: gain > 0 ? gain / loss : 0, allocation, practical, risk: allocation * loss, posterior };
   }
   function maxLoss(config) {
     const states = config.mode === "market" ? config.states : [stateParams(config)];
@@ -59,7 +87,7 @@
       for (let i = 0; i < config.trades; i++) {
         const state = stateParams(config, marketState), estimate = refs[config.mode === "market" ? marketState : 0];
         const won = random() < (config.mode === "market" ? state.p : trueP);
-        events.push({ r: drawOutcome(config, state, won, random), won, state: marketState, estimated: estimate.allocation, estimatedLoss: estimate.loss });
+        events.push({ r: drawOutcome(config, state, won, random), won, state: marketState, estimated: estimate.practical, estimatedLoss: estimate.loss });
         if (config.mode === "market" && random() > state.stay) {
           const other = [0, 1, 2].filter(x => x !== marketState);
           marketState = other[random() < .5 ? 0 : 1];
@@ -92,13 +120,43 @@
     const best = values.reduce((a, b) => b.growth > a.growth ? b : a, values[0]);
     return { values, best, sampleCount: samples.length };
   }
+  function finalHistogram(finals, initial, bins = 20) {
+    const positive = finals.filter(x => x > 0 && Number.isFinite(x));
+    const logs = positive.map(x => Math.log(x / initial)).sort((a, b) => a - b);
+    const zero = finals.length - positive.length;
+    if (!logs.length) return { bars: [], smooth: [], zero, leftTail: 0, rightTail: 0, total: finals.length, lo: 0, hi: 0 };
+    let lo = quantile(logs, .01), hi = quantile(logs, .99);
+    if (hi - lo < .02) { const center = (hi + lo) / 2; lo = center - .1; hi = center + .1; }
+    const counts = Array(bins).fill(0);
+    let leftTail = 0, rightTail = 0;
+    for (const x of logs) {
+      if (x < lo) leftTail++;
+      else if (x > hi) rightTail++;
+      else counts[Math.min(bins - 1, Math.floor((x - lo) / (hi - lo) * bins))]++;
+    }
+    const bars = counts.map((count, i) => ({ x: lo + (i + .5) / bins * (hi - lo), probability: count / finals.length, count }));
+    const smooth = bars.map((bar, i) => {
+      let weighted = 0, weights = 0;
+      for (let j = 0; j < bins; j++) { const weight = Math.exp(-.5 * ((i - j) / 1.15) ** 2); weighted += bars[j].probability * weight; weights += weight; }
+      return { x: bar.x, probability: weighted / weights };
+    });
+    const mean = logs.reduce((sum, x) => sum + x, 0) / logs.length;
+    const variance = logs.reduce((sum, x) => sum + (x - mean) ** 2, 0) / logs.length;
+    const sigma = Math.sqrt(variance), binWidth = (hi - lo) / bins;
+    const lognormal = logs.length >= 5 && sigma > 1e-8 ? Array.from({ length: bins * 4 + 1 }, (_, i) => {
+      const x = lo + i / (bins * 4) * (hi - lo), z = (x - mean) / sigma;
+      return { x, probability: Math.exp(-z * z / 2) / (sigma * Math.sqrt(2 * Math.PI)) * binWidth * positive.length / finals.length };
+    }) : [];
+    return { bars, smooth, lognormal, zero, leftTail, rightTail, total: finals.length, lo, hi };
+  }
   function evaluate(config, scenarios) {
     const results = strategies.map(strategy => ({ ...strategy, name: strategy.id === "super" ? `${config.superMultiplier}×凯利` : strategy.name, example: null, finals: [], drawdowns: [], halvings: 0, ruins: 0, clipped: false }));
     const sampleRandom = rng(config.seed + 73471), samples = [];
-    let run = 0, seen = 0;
+    let run = 0, seen = 0, exampleWins = 0, exampleLongestLoss = 0, exampleLossStreak = 0;
     for (const scenario of scenarios) {
       const states = results.map(() => ({ logWealth: Math.log(config.initial), logPeak: Math.log(config.initial), worst: 0, halved: false, ruined: false, path: run === 0 ? [{ wealth: config.initial, drawdown: 0, r: null, f: 0, risk: 0, state: 1 }] : null }));
       for (const event of scenario.events) {
+        if (run === 0) { if (event.won) { exampleWins++; exampleLossStreak = 0; } else { exampleLossStreak++; exampleLongestLoss = Math.max(exampleLongestLoss, exampleLossStreak); } }
         seen++;
         if (samples.length < 50000) samples.push(event.r);
         else { const index = Math.floor(sampleRandom() * seen); if (index < samples.length) samples[index] = event.r; }
@@ -132,7 +190,7 @@
       result.halfRate = result.halvings / run; result.ruinRate = result.ruins / run;
     });
     const ref = reference(config);
-    return { strategies: results, cap: config.cap, reference: ref, theoretical: ref.risk, theoreticalAllocation: ref.allocation, growth: growthCurve(samples) };
+    return { strategies: results, cap: config.cap, reference: ref, theoretical: ref.risk, theoreticalAllocation: ref.allocation, exampleWins, exampleLongestLoss, growth: growthCurve(samples) };
   }
   function simulate(config) { return evaluate(config, scenarioIterator(config)); }
   function sensitivity(config, metric) {
@@ -144,7 +202,7 @@
       const actual = pMax - y * (pMax - pMin) / 10, row = [];
       for (let x = 0; x < 11; x++) {
         const estimate = pMin + x * (pMax - pMin) / 10;
-        const amount = Math.min(1, config.cap / ref.loss, kelly(estimate, ref.gain, ref.loss));
+        const amount = Math.min(1, config.cap / ref.loss, practicalKelly(estimate, outcomeGrid(config, state)));
         if (metric === "growth") {
           const winGrowth = wins.reduce((sum, r) => sum + Math.log1p(amount * r), 0) / wins.length;
           const lossGrowth = losses.reduce((sum, r) => sum + Math.log1p(amount * r), 0) / losses.length;
@@ -168,6 +226,6 @@
     }
     return { cells, pMin, pMax };
   }
-  root.KellySim = { rng, beta, betaQuantile, kelly, quantile, strategies, reference, maxLoss, drawOutcome, generate, allocation, evaluate, simulate, sensitivity, growthCurve };
+  root.KellySim = { rng, beta, betaQuantile, kelly, practicalKelly, outcomeGrid, finalHistogram, quantile, strategies, reference, maxLoss, drawOutcome, generate, allocation, evaluate, simulate, sensitivity, growthCurve };
   if (typeof module !== "undefined") module.exports = root.KellySim;
 })(typeof window !== "undefined" ? window : globalThis);

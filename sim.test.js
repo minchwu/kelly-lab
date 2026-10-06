@@ -60,7 +60,7 @@ test("posterior mean sets size while each path draws one possible true win rate"
   close(ref.posterior.high, .975);
   assert.equal(new Set(paths[0].events.map(e => e.estimated)).size, 1);
   assert.notEqual(paths[0].trueP, paths[1].trueP);
-  close(paths[0].events[0].estimated, ref.allocation);
+  close(paths[0].events[0].estimated, ref.practical);
 });
 
 test("market state changes use only observed state inputs for allocation", () => {
@@ -71,7 +71,23 @@ test("market state changes use only observed state inputs for allocation", () =>
   ] };
   const path = S.generate({ ...config, runs: 1 })[0];
   assert.equal(path.events[0].state, 1);
-  for (const event of path.events) close(event.estimated, S.reference(config, event.state).allocation);
+  for (const event of path.events) close(event.estimated, S.reference(config, event.state).practical);
+});
+
+test("practical Kelly maximizes the configured return distribution inside the unlevered range", () => {
+  const config = { ...base, p: .53, win: .12, stop: .1, cost: .002, slippage: .04, variation: .4, trailCoverage: .2 };
+  const ref = S.reference(config), grid = S.outcomeGrid(config, { p: config.p, win: config.win, loss: config.stop });
+  const growth = amount => config.p * grid.wins.reduce((sum, x) => sum + x.weight * Math.log1p(amount * x.r), 0) + (1 - config.p) * grid.losses.reduce((sum, x) => sum + x.weight * Math.log1p(amount * x.r), 0);
+  assert.ok(ref.practical >= 0 && ref.practical <= 1);
+  assert.ok(growth(ref.practical) >= growth(Math.max(0, ref.practical - .05)) - 1e-12);
+  assert.ok(growth(ref.practical) >= growth(Math.min(1, ref.practical + .05)) - 1e-12);
+});
+
+test("histogram counts every result including zero and tails", () => {
+  const data = S.finalHistogram([0, 50, 80, 100, 120, 150, 300], 100, 4);
+  assert.equal(data.zero, 1);
+  assert.equal(data.bars.reduce((sum, bar) => sum + bar.count, 0) + data.leftTail + data.rightTail + data.zero, 7);
+  assert.ok(data.bars.every(bar => bar.probability >= 0 && bar.probability <= 1));
 });
 
 test("zero trades preserve funds and produce an empty growth sample", () => {
