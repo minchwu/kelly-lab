@@ -94,7 +94,7 @@
     $("focusStrategy").innerHTML = results.strategies.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
     $("focusStrategy").value = focused;
     $("growthBest").textContent = results.growth.sampleCount ? `样本内峰值 ${percent(results.growth.best.allocation)} 仓位` : "暂无交易样本";
-    $("growthMethod").textContent = `按同批模拟结果中 ${results.growth.sampleCount.toLocaleString("zh-CN")} 笔持仓净涨跌幅计算${config.trades * config.runs > 50000 ? "（随机抽样）" : ""}；含止损、滑点和成本。青绿虚线为样本峰值，红色虚线为${config.mode === "market" ? "示例路径首笔" : "当前"}全凯利受约束后的买入占比。${ref.allocation > 1 ? "按平均盈亏计算的无约束凯利买入占比超出无杠杆范围，图中 0–100% 区间可能持续上升。" : ""}`;
+    $("growthMethod").textContent = `青绿色实线为同批模拟交易的实际平均对数增长；灰色虚线为固定胜率、平均盈亏的理想两点凯利曲线。青绿圆点为实际样本峰值，红色虚线为${config.mode === "market" ? "示例路径首笔" : "当前"}全凯利受约束后的买入占比。实际交易分布、状态切换和成本会使两条曲线出现偏离。`;
     $("heatDescription").textContent = config.mode === "market" ? "以普通状态及当前执行假设为参照，横轴按全凯利估计仓位" : "以当前盈亏幅度、动态止损、滑点和成本为参照，横轴按全凯利估计仓位";
     $("heatLegend").innerHTML = `<div class="heat-legend"></div><div class="heat-legend-label"><span>${metric === "growth" ? "较低增长" : "较高风险"}</span><span>${metric === "growth" ? "较高增长" : "较低风险"}</span></div>`;
     renderCharts();
@@ -115,12 +115,13 @@
     C.distribution($("distributionChart"), results.strategies, config.initial);
     renderHistogram();
     const full = results.strategies.find(r => r.id === "full");
-    C.growthChart($("growthChart"), results.growth, { full: full.example[config.trades ? 1 : 0].f });
+    C.growthChart($("growthChart"), { ...results.growth, ideal: results.ideal }, { full: full.example[config.trades ? 1 : 0].f, current: results.reference.selected });
     C.heatmap($("heatChart"), heatData, metric);
   }
   function renderHistogram() {
     if (!results) return;
     const strategy = results.strategies.find(r => r.id === focused), data = S.finalHistogram(strategy.finals, config.initial);
+    C.histogramOverlay($("histogramOverlayChart"), results.strategies.map(r => ({ data: S.finalHistogram(r.finals, config.initial), color: r.color, dash: r.dash, focused: r.id === focused })));
     C.histogram($("histogramChart"), data, strategy.color, config.initial);
     $("histogramCount").textContent = `${strategy.name} · ${data.total} 次`;
     $("histogramNote").textContent = `最终金额为零或数值下溢 ${data.zero} 次（${percent(data.zero / data.total)}）；绘图区间外较低 ${data.leftTail} 次、较高 ${data.rightTail} 次，均计入统计。柱状图按最终资金的对数等宽分组；对数正态线仅对正资金样本做矩估计，并按全部模拟次数缩放，不包含零值。全部路径都计入，未剔除失败样本。`;

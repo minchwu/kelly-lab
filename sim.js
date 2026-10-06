@@ -121,6 +121,16 @@
     const best = values.reduce((a, b) => b.growth > a.growth ? b : a, values[0]);
     return { values, best, sampleCount: samples.length };
   }
+  function idealKellyCurve(config, reference) {
+    const values = [];
+    for (let i = 0; i <= 50; i++) {
+      const allocation = i / 50, down = 1 - allocation * reference.loss;
+      const growth = down <= 0 || 1 + allocation * reference.gain <= 0 ? -Infinity : reference.p * Math.log1p(allocation * reference.gain) + (1 - reference.p) * Math.log(down);
+      values.push({ allocation, growth });
+    }
+    const best = values.reduce((a, b) => b.growth > a.growth ? b : a, values[0]);
+    return { values, best };
+  }
   function finalHistogram(finals, initial, bins = 20) {
     const positive = finals.filter(x => x > 0 && Number.isFinite(x));
     const logs = positive.map(x => Math.log(x / initial)).sort((a, b) => a - b);
@@ -192,7 +202,7 @@
       result.halfRate = result.halvings / run; result.ruinRate = result.ruins / run;
     });
     const ref = reference(config);
-    return { strategies: results, cap: config.cap, reference: ref, theoretical: ref.risk, theoreticalAllocation: ref.allocation, exampleWins, exampleLongestLoss, growth: growthCurve(samples) };
+    return { strategies: results, cap: config.cap, reference: ref, theoretical: ref.risk, theoreticalAllocation: ref.allocation, exampleWins, exampleLongestLoss, growth: growthCurve(samples), ideal: idealKellyCurve(config, ref) };
   }
   function simulate(config) { return evaluate(config, scenarioIterator(config)); }
   function sensitivity(config, metric) {
@@ -228,6 +238,6 @@
     }
     return { cells, pMin, pMax };
   }
-  root.KellySim = { rng, beta, betaQuantile, kelly, practicalKelly, outcomeGrid, finalHistogram, quantile, strategies, reference, maxLoss, drawOutcome, generate, allocation, evaluate, simulate, sensitivity, growthCurve };
+  root.KellySim = { rng, beta, betaQuantile, kelly, practicalKelly, outcomeGrid, finalHistogram, idealKellyCurve, quantile, strategies, reference, maxLoss, drawOutcome, generate, allocation, evaluate, simulate, sensitivity, growthCurve };
   if (typeof module !== "undefined") module.exports = root.KellySim;
 })(typeof window !== "undefined" ? window : globalThis);

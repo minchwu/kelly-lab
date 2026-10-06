@@ -75,9 +75,20 @@
     text(ctx, "每个区间的模拟比例", left, 14);
     text(ctx, "最终资金 / 初始资金 · 对数横轴", right, 14, "right");
   }
+  function histogramOverlay(canvas, datasets) {
+    const { ctx, w, h } = setup(canvas), left = 58, right = w - 18, top = 24, bottom = h - 34;
+    const valid = datasets.filter(d => d.data.bars.length), lo = Math.min(...valid.map(d => d.data.lo)), hi = Math.max(...valid.map(d => d.data.hi));
+    if (!valid.length || !(hi > lo)) { text(ctx, "暂无足够的正资金样本", left, (top + bottom) / 2); return; }
+    const max = Math.max(.05, ...valid.flatMap(d => d.data.smooth.map(x => x.probability))) * 1.18;
+    const xp = x => left + (x - lo) / (hi - lo) * (right - left), yp = p => bottom - p / max * (bottom - top);
+    grid(ctx, left, top, right, bottom);
+    for (let i = 0; i <= 4; i++) { text(ctx, `${(max * (4 - i) / 4 * 100).toFixed(0)}%`, left - 7, top + i * (bottom - top) / 4 + 3, "right"); text(ctx, `${Math.exp(lo + i * (hi - lo) / 4).toFixed(1)}×`, xp(lo + i * (hi - lo) / 4), h - 10, "center"); }
+    valid.forEach(d => { ctx.strokeStyle = d.color; ctx.lineWidth = d.focused ? 3 : 1.8; ctx.globalAlpha = d.focused ? 1 : .74; ctx.setLineDash(d.dash || []); ctx.beginPath(); d.data.smooth.forEach((point, i) => i ? ctx.lineTo(xp(point.x), yp(point.probability)) : ctx.moveTo(xp(point.x), yp(point.probability))); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; });
+    text(ctx, "各策略最终资金的经验概率 · 对数横轴", left, 14);
+  }
   function growthChart(canvas, data, markers) {
     const { ctx, w, h } = setup(canvas), left = 61, right = w - 22, top = 21, bottom = h - 33;
-    const finite = data.values.map(d => d.growth).filter(Number.isFinite);
+    const finite = data.values.map(d => d.growth).concat((data.ideal?.values || []).map(d => d.growth)).filter(Number.isFinite);
     let min = Math.min(0, ...finite), max = Math.max(0, ...finite);
     const pad = Math.max(.001, (max - min) * .12);
     min -= pad; max += pad;
@@ -101,7 +112,9 @@
       started = true;
     });
     ctx.stroke();
+    if (data.ideal) { ctx.strokeStyle = "#52676d"; ctx.lineWidth = 1.8; ctx.setLineDash([7, 4]); ctx.beginPath(); let idealStarted = false; data.ideal.values.forEach(point => { if (!Number.isFinite(point.growth)) { idealStarted = false; return; } idealStarted ? ctx.lineTo(xp(point.allocation), yp(point.growth)) : ctx.moveTo(xp(point.allocation), yp(point.growth)); idealStarted = true; }); ctx.stroke(); ctx.setLineDash([]); }
     if (data.sampleCount) { ctx.fillStyle = "#277e72"; ctx.beginPath(); ctx.arc(xp(data.best.allocation), yp(data.best.growth), 5, 0, Math.PI * 2); ctx.fill(); }
+    if (markers.current !== undefined) { ctx.fillStyle = "#c95752"; ctx.beginPath(); ctx.arc(xp(Math.min(1, markers.current)), yp(data.ideal ? data.ideal.values[Math.round(Math.min(1, markers.current) * 50)].growth : 0), 5, 0, Math.PI * 2); ctx.fill(); }
     text(ctx, "每笔平均对数增长", left, 13, "left");
   }
   function color(value, min, max, metric) {
@@ -118,5 +131,5 @@
     for (let i = 0; i <= 10; i += 2) { const p = data.pMin + (data.pMax - data.pMin) * i / 10; text(ctx, `${(p * 100).toFixed(0)}%`, left + (i + .5) * cw, h - 7, "center", "#68787b", 9); const q = data.pMax - (data.pMax - data.pMin) * i / 10; text(ctx, `${(q * 100).toFixed(0)}%`, left - 4, top + (i + .5) * ch + 3, "right", "#68787b", 9); }
     return { left, top, cw, ch };
   }
-  root.KellyCharts = { lineChart, distribution, histogram, growthChart, heatmap };
+  root.KellyCharts = { lineChart, distribution, histogram, histogramOverlay, growthChart, heatmap };
 })(window);
