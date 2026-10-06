@@ -1,7 +1,7 @@
 (function () {
   "use strict";
   const S = window.KellySim, C = window.KellyCharts, $ = id => document.getElementById(id);
-  const defaults = { mode: "basic", p: .6, win: .15, b: 1.5, stop: .1, trades: 200, initial: 100000, runs: 300, seed: 2026, cap: .05, superMultiplier: 1.5, history: 100, wins: 60, cost: .002, slippage: .02, trailCoverage: .3, tightStop: .03, variation: .2, states: [{ p: .72, win: .18, loss: .08, stay: .8 }, { p: .6, win: .15, loss: .1, stay: .72 }, { p: .43, win: .1, loss: .12, stay: .84 }] };
+  const defaults = { mode: "basic", kellyMethod: "distribution", p: .6, win: .15, b: 1.5, stop: .1, trades: 200, initial: 10000, runs: 300, seed: 2026, cap: .05, superMultiplier: 1.5, history: 100, wins: 60, cost: .002, slippage: .02, trailCoverage: .3, tightStop: .03, variation: .2, states: [{ p: .72, win: .18, loss: .08, stay: .8 }, { p: .6, win: .15, loss: .1, stay: .72 }, { p: .43, win: .1, loss: .12, stay: .84 }] };
   const presets = {
     small: { p: .55, win: .12, stop: .1, history: 100, wins: 55, states: [{ p: .64, win: .15, loss: .08, stay: .8 }, { p: .54, win: .12, loss: .1, stay: .72 }, { p: .4, win: .08, loss: .12, stay: .84 }] },
     high: { p: .75, win: .08, stop: .1, history: 100, wins: 75, states: [{ p: .81, win: .1, loss: .08, stay: .8 }, { p: .74, win: .08, loss: .1, stay: .72 }, { p: .62, win: .06, loss: .12, stay: .84 }] },
@@ -28,13 +28,15 @@
     $("basicFields").innerHTML = field("p", ...specs.p) + field("win", ...specs.win) + field("stop", ...specs.stop) + field("b", ...specs.b) + `<p class="field-hint">平均盈利 ÷ 计划亏损；改动任一项会同步更新</p>`;
     $("estimateFields").innerHTML = field("history", ...specs.history) + field("wins", ...specs.wins) + field("win", ...specs.win) + field("stop", ...specs.stop) + field("b", ...specs.b);
     $("marketFields").innerHTML = config.states.map((state, i) => `<div class="state-group"><h3>${stateNames[i]}状态</h3>${field(`states.${i}.p`, "胜率", 1, 99, 1, "%", 100)}${field(`states.${i}.win`, "平均盈利", .5, 100, .5, "%", 100)}${field(`states.${i}.loss`, "平均亏损", .5, 50, .5, "%", 100)}${field(`states.${i}.stay`, "持续倾向", 0, 99, 1, "%", 100)}</div>`).join("");
-    $("commonFields").innerHTML = field("trades", ...specs.trades) + field("initial", ...specs.initial) + field("runs", ...specs.runs) + `<p class="field-hint">交易次数 × 重复次数最多 300 万笔</p>` + field("seed", ...specs.seed, false) + field("cap", ...specs.cap) + `<p class="field-hint">按估计亏损控制；跳空滑点可能使实际亏损超出上限</p>` + field("superMultiplier", ...specs.superMultiplier) + field("cost", ...specs.cost) + field("slippage", ...specs.slippage) + field("trailCoverage", ...specs.trailCoverage) + field("tightStop", ...specs.tightStop) + field("variation", ...specs.variation);
+    $("commonFields").innerHTML = `<label class="field"><span>凯利计算方法</span><select data-key="kellyMethod" aria-label="凯利计算方法"><option value="twoPoint" ${config.kellyMethod === "twoPoint" ? "selected" : ""}>两点凯利（平均盈亏）</option><option value="distribution" ${config.kellyMethod === "distribution" ? "selected" : ""}>多点 / 分布凯利（执行分布）</option></select><small>分布凯利会把波动、收紧止损、滑点和成本纳入求解</small></label>` + field("trades", ...specs.trades) + field("initial", ...specs.initial) + field("runs", ...specs.runs) + `<p class="field-hint">交易次数 × 重复次数最多 300 万笔</p>` + field("seed", ...specs.seed, false) + field("cap", ...specs.cap) + `<p class="field-hint">按估计亏损控制；跳空滑点可能使实际亏损超出上限</p>` + field("superMultiplier", ...specs.superMultiplier) + field("cost", ...specs.cost) + field("slippage", ...specs.slippage) + field("trailCoverage", ...specs.trailCoverage) + field("tightStop", ...specs.tightStop) + field("variation", ...specs.variation);
     document.querySelectorAll("[data-key]").forEach(input => input.addEventListener("input", onField));
     document.querySelectorAll("#modeTabs button").forEach(button => button.classList.toggle("active", button.dataset.mode === config.mode));
     ["basic", "estimate", "market"].forEach(m => $(`${m}Fields`).classList.toggle("hidden", config.mode !== m));
   }
   function onField(event) {
-    const input = event.target, key = input.dataset.key, value = Number(input.value), factor = key.startsWith("states.") ? 100 : specs[key][5];
+    const input = event.target, key = input.dataset.key;
+    if (key === "kellyMethod") { config.kellyMethod = input.value; schedule(); return; }
+    const value = Number(input.value), factor = key.startsWith("states.") ? 100 : specs[key][5];
     set(key, input.value === "" ? NaN : value / factor);
     document.querySelectorAll(`[data-key="${key}"]`).forEach(peer => { if (peer !== input) peer.value = input.value; });
     if (key === "b") config.win = config.b * config.stop;
@@ -75,18 +77,19 @@
   }
   function render() {
     const ref = results.reference;
-    const fullAllocation = S.allocation({ id: "full", factor: 1 }, { estimated: ref.practical, estimatedLoss: ref.loss }, config);
+    const fullAllocation = S.allocation({ id: "full", factor: 1 }, { estimated: ref.selected, estimatedLoss: ref.loss }, config);
     $("kellyValue").textContent = percent(results.theoretical);
-    $("kellyContext").textContent = `二点公式买入 ${percent(ref.allocation)} · 波动分布最优买入 ${percent(ref.practical)} · 实际全凯利买入 ${percent(fullAllocation)}${config.mode === "estimate" ? " · 按历史估计" : config.mode === "market" ? " · 普通状态" : ""}`;
+    $("kellyContext").textContent = `当前${config.kellyMethod === "twoPoint" ? "两点" : "分布"}凯利买入 ${percent(ref.selected)} · 两点参照 ${percent(ref.allocation)} · 分布参照 ${percent(ref.practical)} · 实际全凯利买入 ${percent(fullAllocation)}${config.mode === "estimate" ? " · 按历史估计" : config.mode === "market" ? " · 普通状态" : ""}`;
     $("posterior").classList.toggle("hidden", config.mode !== "estimate");
     if (config.mode === "estimate") $("posterior").innerHTML = `胜率后验 Beta(${ref.posterior.a}, ${ref.posterior.b})<br><strong>估计 ${percent(ref.p)}</strong> · 95% 可信区间 ${percent(ref.posterior.low)}–${percent(ref.posterior.high)}`;
     $("runCount").textContent = `${config.runs} 次`;
     $("summaryBody").innerHTML = results.strategies.map(r => `<tr><td><i class="strategy-dot" style="--color:${r.color}"></i>${r.name}</td><td>${money(r.q50)}</td><td><span class="stat-pair">${percent(r.dd50)}<small>${percent(r.dd95)}</small></span></td><td><span class="stat-pair">${percent(r.halfRate)}<small>${percent(r.ruinRate)}</small></span></td></tr>`).join("");
+    $("distributionStats").innerHTML = results.strategies.map(r => `<tr class="${focused === r.id ? "selected" : ""}"><td><i class="strategy-dot" style="--color:${r.color}"></i>${r.name}</td><td>${money(r.mean)}</td><td>${money(r.q05)}</td><td>${money(r.q50)}</td><td>${money(r.q95)}</td><td>${percent(r.halfRate)}</td><td>${percent(r.ruinRate)}</td></tr>`).join("");
     $("legend").innerHTML = results.strategies.map(r => `<button type="button" data-strategy="${r.id}" class="${visibility[r.id] ? "" : "off"} ${focused === r.id ? "focused" : ""}" aria-pressed="${visibility[r.id]}" title="显示或隐藏${r.name}"><svg width="25" height="8" aria-hidden="true"><line x1="1" y1="4" x2="24" y2="4" stroke="${r.color}" stroke-width="3" ${r.dash.length ? `stroke-dasharray="${r.dash.join(" ")}"` : ""}/></svg>${r.name}</button>`).join("");
     $("legend").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { visibility[b.dataset.strategy] = !visibility[b.dataset.strategy]; renderPathCharts(); renderLegend(); }));
     const gross = config.mode === "market" ? config.states[1] : { win: config.win, loss: config.stop };
     $("workedExample").textContent = `当前参照：胜率 ${percent(ref.p)}，平均盈利 ${percent(gross.win)}，计划亏损 ${percent(gross.loss)}，毛盈亏比 ${(gross.win / gross.loss).toFixed(2)}。计入止损收紧、预期滑点和成本后，估计单笔净盈利 ${percent(ref.gain)}、平均净亏损 ${percent(ref.loss)}。`;
-    $("positionExample").textContent = `仓位是买入金额占账户资金比例。二点公式对应账户风险 ${percent(ref.risk)}；实际按波动分布定仓，再受 ${percent(config.cap)} 计划风险上限约束，当前全凯利买入 ${percent(fullAllocation)}。满仓时标的净跌 10%，账户约跌 10%；滑点可使亏损扩大。`;
+    $("positionExample").textContent = `仓位是买入金额占账户资金比例。当前${config.kellyMethod === "twoPoint" ? "两点" : "分布"}凯利买入 ${percent(ref.selected)}，两点参照账户风险 ${percent(ref.risk)}；实际仓位再受 ${percent(config.cap)} 计划风险上限约束。满仓时标的净跌 10%，账户约跌 10%；滑点可使亏损扩大。`;
     $("pathInsight").textContent = config.trades ? `首条路径：${config.trades} 笔中判定盈利 ${results.exampleWins} 笔（${percent(results.exampleWins / config.trades)}），最长连续亏损 ${results.exampleLongestLoss} 笔。${config.mode === "market" ? "状态有持续性，可能出现连续逆风。" : config.mode === "estimate" ? "本路径真实胜率由后验抽取后固定。" : "每笔输赢独立抽样，连续亏损仍可能发生。"} 当前参照假设每笔持仓净涨跌的均值约 ${percent(ref.p * ref.gain - (1 - ref.p) * ref.loss)}；若优势不能长期维持，复利曲线会明显改变。` : "零交易：资金保持初始值。";
     $("focusStrategy").innerHTML = results.strategies.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
     $("focusStrategy").value = focused;

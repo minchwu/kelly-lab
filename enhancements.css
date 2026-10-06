@@ -11,6 +11,12 @@
 .distribution-detail h3 { font-size: 14px; }
 .distribution-detail p { color: var(--muted); font-size: 11px; margin-top: 3px; }
 .distribution-detail strong { color: #147d69; white-space: nowrap; font-size: 11px; }
+.distribution-stats-wrap { overflow-x: auto; margin: 0 0 14px; }
+.distribution-stats { border-collapse: collapse; min-width: 620px; width: 100%; font-size: 10px; }
+.distribution-stats th, .distribution-stats td { padding: 7px 6px; border-bottom: 1px solid #e9eeee; text-align: right; white-space: nowrap; }
+.distribution-stats th { color: var(--muted); font-weight: 600; }
+.distribution-stats th:first-child, .distribution-stats td:first-child { text-align: left; }
+.distribution-stats tr.selected { background: #edf5f2; }
 .histogram-frame { height: 278px; }
 .controls { position: sticky; top: 12px; max-height: min(820px, calc(100vh - 90px)); overflow-y: auto; }
 .range-row { grid-template-columns: minmax(0, 1fr) 92px; }

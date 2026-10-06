@@ -62,7 +62,8 @@
     const loss = state.loss * (1 - config.trailCoverage) + tight * config.trailCoverage + config.slippage / 2 + config.cost;
     const allocation = kelly(p, gain, loss);
     const practical = practicalKelly(p, outcomeGrid(config, state));
-    return { p, gain, loss, b: gain > 0 ? gain / loss : 0, allocation, practical, risk: allocation * loss, posterior };
+    const selected = config.kellyMethod === "twoPoint" ? allocation : practical;
+    return { p, gain, loss, b: gain > 0 ? gain / loss : 0, allocation, practical, selected, risk: allocation * loss, posterior };
   }
   function maxLoss(config) {
     const states = config.mode === "market" ? config.states : [stateParams(config)];
@@ -87,7 +88,7 @@
       for (let i = 0; i < config.trades; i++) {
         const state = stateParams(config, marketState), estimate = refs[config.mode === "market" ? marketState : 0];
         const won = random() < (config.mode === "market" ? state.p : trueP);
-        events.push({ r: drawOutcome(config, state, won, random), won, state: marketState, estimated: estimate.practical, estimatedLoss: estimate.loss });
+        events.push({ r: drawOutcome(config, state, won, random), won, state: marketState, estimated: estimate.selected, estimatedLoss: estimate.loss });
         if (config.mode === "market" && random() > state.stay) {
           const other = [0, 1, 2].filter(x => x !== marketState);
           marketState = other[random() < .5 ? 0 : 1];
@@ -186,6 +187,7 @@
     }
     results.forEach(result => {
       result.q05 = quantile(result.finals, .05); result.q50 = quantile(result.finals, .5); result.q95 = quantile(result.finals, .95);
+      result.mean = result.finals.length ? result.finals.reduce((sum, value) => sum + value, 0) / result.finals.length : NaN;
       result.dd50 = quantile(result.drawdowns, .5); result.dd95 = quantile(result.drawdowns, .95);
       result.halfRate = result.halvings / run; result.ruinRate = result.ruins / run;
     });
@@ -202,7 +204,7 @@
       const actual = pMax - y * (pMax - pMin) / 10, row = [];
       for (let x = 0; x < 11; x++) {
         const estimate = pMin + x * (pMax - pMin) / 10;
-        const amount = Math.min(1, config.cap / ref.loss, practicalKelly(estimate, outcomeGrid(config, state)));
+        const amount = Math.min(1, config.cap / ref.loss, config.kellyMethod === "twoPoint" ? kelly(estimate, ref.gain, ref.loss) : practicalKelly(estimate, outcomeGrid(config, state)));
         if (metric === "growth") {
           const winGrowth = wins.reduce((sum, r) => sum + Math.log1p(amount * r), 0) / wins.length;
           const lossGrowth = losses.reduce((sum, r) => sum + Math.log1p(amount * r), 0) / losses.length;
