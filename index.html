@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>凯利仓位实验台</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="enhancements.css">
+  <script src="random.js" defer></script>
+  <script src="sim.js" defer></script>
+  <script src="charts.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="identity"><span class="mark">K</span><div><h1>凯利仓位实验台</h1><p>仓位与风险分析</p></div></div>
+    <div class="top-actions"><span class="local-tag">本地模拟 · 非收益预测</span><button id="reset" class="icon-button" type="button" title="重置所有参数" aria-label="重置所有参数">↺</button></div>
+  </header>
+  <main>
+    <div class="workspace">
+      <aside class="controls" aria-label="模拟参数">
+        <div class="section-heading"><div><span class="index">01 / 设置</span><h2>实验参数</h2></div></div>
+        <fieldset class="mode-select"><legend>模拟模式</legend><div class="segments" id="modeTabs"><button type="button" data-mode="basic" class="active">基础</button><button type="button" data-mode="estimate">估计误差</button><button type="button" data-mode="market">市场变化</button></div></fieldset>
+        <label class="field">情景预设<select id="preset"><option value="custom">自定义</option><option value="small">小幅优势</option><option value="high">高胜率低盈亏比</option><option value="low">低胜率高盈亏比</option><option value="over">优势被高估</option></select></label>
+        <div id="basicFields" class="field-group"></div>
+        <div id="estimateFields" class="field-group hidden"></div>
+        <div id="marketFields" class="field-group hidden"></div>
+        <div class="divider"></div>
+        <div id="commonFields" class="field-group"></div>
+        <div id="validation" class="notice" role="status" aria-live="polite"></div>
+      </aside>
+
+      <section class="primary" aria-label="主要图表">
+        <div class="section-heading chart-heading"><div><span class="index">02 / 路径</span><h2>资金与回撤</h2><p>同一批交易结果下的单条示例路径</p></div><div class="scale-switch"><span>资金刻度</span><div class="segments compact" id="scaleTabs"><button type="button" data-scale="linear">线性</button><button type="button" data-scale="log" class="active">对数</button></div></div></div>
+        <div id="legend" class="legend"></div>
+        <div class="chart-frame"><canvas id="equityChart" aria-label="各策略资金曲线" role="img"></canvas><div id="equityTip" class="chart-tip hidden"></div></div>
+        <div class="subchart-label"><h3>每笔买入仓位占比</h3><span id="riskReadout">按当笔可观察信息定仓</span></div>
+        <div class="chart-frame risk-frame"><canvas id="riskChart" aria-label="各策略每笔买入金额占账户资金比例曲线" role="img"></canvas><div id="riskTip" class="chart-tip hidden"></div></div>
+        <div class="subchart-label"><h3>水下回撤</h3><span>距历史峰值</span></div>
+        <div class="chart-frame drawdown-frame"><canvas id="drawdownChart" aria-label="各策略水下回撤曲线" role="img"></canvas></div>
+        <div class="axis-caption">交易笔数</div>
+      </section>
+
+      <aside class="summary" aria-label="结果摘要"><div class="section-heading"><div><span class="index">03 / 结果</span><h2>结果摘要</h2></div></div><div class="hero-metric"><span>理论凯利账户风险比例</span><strong id="kellyValue">—</strong><small id="kellyContext"></small></div><div id="posterior" class="posterior hidden"></div><div class="summary-label">重复模拟统计 <span id="runCount"></span></div><div class="summary-table-wrap"><table class="summary-table"><thead><tr><th>策略</th><th>最终资金<br>中位数</th><th>最大回撤<br>中位 / 较差</th><th>曾跌半<br>/ 归零</th></tr></thead><tbody id="summaryBody"></tbody></table></div><p class="summary-note">“较差”指最大回撤的第 95 百分位。归零后不再交易。统计结果不是未来收益预测。</p></aside>
+    </div>
+
+    <section class="lower-section" aria-labelledby="distributionTitle"><div class="section-heading"><div><span class="index">04 / 重复模拟</span><h2 id="distributionTitle">最终资金分布</h2><p>点为各次模拟结果；横线标出第 5、50、95 百分位</p></div></div><div class="chart-frame distribution-frame"><canvas id="distributionChart" aria-label="各策略最终资金分布" role="img"></canvas></div><div class="percentile-key"><span>P5 较差结果</span><span>P50 中位数</span><span>P95 较好结果</span></div></section>
+
+    <section class="lower-section growth-section" aria-labelledby="growthTitle"><div class="section-heading"><div><span class="index">05 / 仓位效率</span><h2 id="growthTitle">仓位与长期增长率</h2><p>同一批模拟交易的净持仓涨跌幅；横轴为固定买入仓位，纵轴为每笔平均对数增长</p></div><div id="growthBest" class="growth-best"></div></div><div class="chart-frame growth-frame"><canvas id="growthChart" aria-label="固定买入仓位与每笔平均对数增长曲线" role="img"></canvas></div><div class="axis-caption">固定买入仓位</div><p id="growthMethod" class="chart-method"></p></section>
+
+    <section class="lower-section sensitivity-section" aria-labelledby="sensitivityTitle"><div class="section-heading"><div><span class="index">06 / 参数敏感性</span><h2 id="sensitivityTitle">胜率估计与实际胜率</h2><p id="heatDescription">以当前盈亏和成本为固定参照，全凯利估计仓位</p></div><label class="metric-select">颜色指标<select id="heatMetric"><option value="growth">每笔预期对数增长</option><option value="drawdown">严重回撤概率</option></select></label></div><div class="heat-layout"><div class="heat-frame"><div class="y-label">实际胜率 ↑</div><canvas id="heatChart" aria-label="胜率敏感性热力图" role="img"></canvas><div class="x-label">用于计算仓位的估计胜率 →</div></div><div class="heat-aside"><div id="heatLegend" class="legend-scale"></div><p>深红表示不利，青绿表示有利。严重回撤指资金从历史峰值下降至少 50%；按每格 48 条、最多 300 笔路径估算。</p><p>横轴用于定仓，纵轴用于生成结果。两者偏离越大，仓位误配越明显。</p></div></div></section>
+
+    <section class="model-note" aria-labelledby="modelTitle"><div class="section-heading"><div><span class="index">07 / 模型边界</span><h2 id="modelTitle">如何阅读结果</h2></div></div><p id="workedExample"></p><div class="note-columns"><p>理论凯利在给定模型下最大化长期对数增长，不保证短期盈利。全凯利和超凯利可能有深回撤；无杠杆买入仓位最多 100%。</p><p>仓位是<strong>买入金额占账户资金比例</strong>；计划账户风险约等于仓位 × 估计亏损幅度。跳空和滑点可能让实际亏损超出计划。100% 满仓遇到标的净跌 10%，账户约跌 10%。</p><p id="positionExample"></p></div><p class="model-detail">动态止损是简化的条件模型：设定比例的亏损单按“收紧后亏损幅度”执行，其余按计划止损附近执行；再叠加幅度波动、亏损滑点及往返成本。它不模拟逐笔盘口、涨跌停成交或 T+1 可卖性。市场状态每笔按持续倾向转换，定仓仅使用当前可观察状态。所有长期结果依赖这些假设，不是收益预测。</p></section>
+  </main>
+  <footer>仅供仓位与风险关系研究 · 不构成具体交易建议</footer>
+</body>
+</html>
