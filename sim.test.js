@@ -52,6 +52,13 @@ test("same seed produces the same net stock returns when position limits change"
   assert.notEqual(low.strategies.find(r => r.id === "full").q50, high.strategies.find(r => r.id === "full").q50);
 });
 
+test("seed 2047 reproduces paths and seed zero has a distinct sequence", () => {
+  const config = { ...base, seed: 2047, runs: 3, trades: 24 };
+  assert.deepEqual(S.generate(config), S.generate(config));
+  assert.notDeepEqual(S.generate(config), S.generate({ ...config, seed: 2048 }));
+  assert.notEqual(S.rng(0)(), S.rng(1)());
+});
+
 test("posterior mean sets size while each path draws one possible true win rate", () => {
   const config = { ...base, mode: "estimate", history: 0, wins: 0 };
   const ref = S.reference(config), paths = S.generate(config);
