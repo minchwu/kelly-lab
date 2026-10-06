@@ -66,7 +66,7 @@
     if (results.reference.practical <= 0) messages.push("扣除执行成本后当前估计无正优势，实际凯利仓位为 0；固定风险 1% 与满仓仍承担风险。");
     if (config.cost >= (config.mode === "market" ? Math.min(...config.states.map(s => s.win)) : config.win) * (1 - config.variation)) messages.push("部分盈利交易的毛收益可能低于往返成本，扣费后也可能出现净亏损。");
     if (config.trades === 0) messages.push("交易次数为 0，各策略资金保持初始值，回撤为 0。");
-    if (results.theoreticalAllocation > 1) messages.push("理论凯利买入占比超过 100%，普通策略按无杠杆上限和计划风险上限收敛。");
+    if (results.theoreticalAllocation > 1) messages.push("两点公式的无约束理论仓位超过 100%，这只表示需要杠杆才能实现；模拟中的所有策略仍按无杠杆和计划风险上限收敛。");
     if (config.mode === "market" && config.states.some((_, i) => S.reference(config, i).allocation === 0)) messages.push("部分市场状态扣费后无正优势，该状态凯利仓位为 0。");
     if (results.reference.practical * results.reference.loss * config.superMultiplier > config.cap) messages.push("超凯利仓位可能触及计划账户风险上限。");
     if (config.trailCoverage > 0 && config.mode !== "market" && config.tightStop >= config.stop) messages.push("收紧后亏损不小于计划止损，动态止损不会减少这类亏损。");
@@ -79,7 +79,7 @@
     const ref = results.reference;
     const fullAllocation = S.allocation({ id: "full", factor: 1 }, { estimated: ref.selected, estimatedLoss: ref.loss }, config);
     $("kellyValue").textContent = percent(results.theoretical);
-    $("kellyContext").textContent = `当前${config.kellyMethod === "twoPoint" ? "两点" : "分布"}凯利买入 ${percent(ref.selected)} · 两点参照 ${percent(ref.allocation)} · 分布参照 ${percent(ref.practical)} · 实际全凯利买入 ${percent(fullAllocation)}${config.mode === "estimate" ? " · 按历史估计" : config.mode === "market" ? " · 普通状态" : ""}`;
+    $("kellyContext").textContent = `当前${config.kellyMethod === "twoPoint" ? "两点" : "分布"}凯利无约束最优 ${percent(ref.selected)}（搜索上限 100%） · 两点参照 ${percent(ref.allocation)} · 分布参照 ${percent(ref.practical)} · 风险上限约束后的全凯利买入 ${percent(fullAllocation)}${config.mode === "estimate" ? " · 按历史估计" : config.mode === "market" ? " · 普通状态" : ""}`;
     $("posterior").classList.toggle("hidden", config.mode !== "estimate");
     if (config.mode === "estimate") $("posterior").innerHTML = `胜率后验 Beta(${ref.posterior.a}, ${ref.posterior.b})<br><strong>估计 ${percent(ref.p)}</strong> · 95% 可信区间 ${percent(ref.posterior.low)}–${percent(ref.posterior.high)}`;
     $("runCount").textContent = `${config.runs} 次`;
