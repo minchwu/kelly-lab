@@ -1,4 +1,5 @@
 .workspace { grid-template-columns: minmax(260px, 296px) minmax(460px, 1fr) minmax(285px, 330px); }
+.brand-logo { width: 32px; height: 32px; display: block; object-fit: cover; border: 1px solid #2a2528; background: #120e11; }
 .controls { position: sticky; top: 12px; max-height: min(820px, calc(100vh - 90px)); overflow-y: auto; }
 .range-row { grid-template-columns: minmax(0, 1fr) 92px; }
 .range-row input[type="range"] { min-width: 0; }
