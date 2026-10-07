@@ -7,11 +7,12 @@
   <link rel="icon" type="image/png" href="logo.png">
   <link rel="apple-touch-icon" href="logo.png">
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="enhancements.css">
+  <link rel="stylesheet" href="enhancements.css?v=20261007">
   <script src="random.js" defer></script>
-  <script src="sim.js" defer></script>
-  <script src="charts.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="sim.js?v=20261007" defer></script>
+  <script src="portfolio.js?v=20261007" defer></script>
+  <script src="charts.js?v=20261007" defer></script>
+  <script src="app.js?v=20261007" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -39,6 +40,7 @@
         <div class="chart-frame"><canvas id="equityChart" aria-label="各策略资金曲线" role="img"></canvas><div id="equityTip" class="chart-tip hidden"></div></div>
         <div class="subchart-label"><h3>每笔买入仓位占比</h3><span id="riskReadout">按当笔可观察信息定仓</span></div>
         <div class="chart-frame risk-frame"><canvas id="riskChart" aria-label="各策略每笔买入金额占账户资金比例曲线" role="img"></canvas><div id="riskTip" class="chart-tip hidden"></div></div>
+        <div id="probabilityPanel" class="hidden"><div class="subchart-label"><h3>交易前市场判断</h3><span>顺风 / 普通 / 逆风的估计概率</span></div><div class="probability-key"><span>顺风</span><span>普通</span><span>逆风</span></div><div class="chart-frame probability-frame"><canvas id="probabilityChart" aria-label="交易前顺风、普通、逆风状态估计概率" role="img"></canvas></div></div>
         <div class="subchart-label"><h3>水下回撤</h3><span>距历史峰值</span></div>
         <div class="chart-frame drawdown-frame"><canvas id="drawdownChart" aria-label="各策略水下回撤曲线" role="img"></canvas></div>
         <div class="axis-caption">交易笔数</div>
@@ -51,9 +53,11 @@
 
     <section class="lower-section growth-section" aria-labelledby="growthTitle"><div class="section-heading"><div><span class="index">05 / 仓位效率</span><h2 id="growthTitle">仓位与长期增长率</h2><p>实线为同批交易的经验增长；虚线为理想两点凯利曲线</p></div><div id="growthBest" class="growth-best"></div></div><div class="chart-frame growth-frame"><canvas id="growthChart" aria-label="经验增长曲线与理想两点凯利曲线" role="img"></canvas></div><div class="axis-caption">固定买入仓位</div><p id="growthMethod" class="chart-method"></p></section>
 
+    <section id="portfolioPanel" class="lower-section portfolio-section hidden" aria-labelledby="portfolioTitle"><div class="section-heading"><div><span class="index">组合实验</span><h2 id="portfolioTitle">打板、波段、趋势与现金</h2><p>三种策略在同一市场状态下可同时亏损；每期权重合计受无杠杆上限约束</p></div></div><div id="portfolioControls" class="portfolio-controls"></div><div id="portfolioStatus" class="chart-method" role="status"></div><div class="portfolio-summary-wrap"><table class="portfolio-summary"><thead><tr><th>配置规则</th><th>最终资金 P5</th><th>中位数</th><th>P95</th><th>最大回撤中位 / 较差</th></tr></thead><tbody id="portfolioSummary"></tbody></table></div><div id="portfolioLegend" class="portfolio-legend"></div><div class="chart-frame portfolio-frame"><canvas id="portfolioEquity" aria-label="组合配置规则的示例资金曲线" role="img"></canvas></div><div class="subchart-label"><h3>信号概率配置的实际权重</h3><span>余额为现金</span></div><div class="chart-frame portfolio-allocation-frame"><canvas id="portfolioAllocation" aria-label="打板、波段、趋势与现金的权重变化" role="img"></canvas></div><p class="chart-method">信号概率与审慎配置只使用交易前信息。审慎配置在当前概率与“顺风概率下移”的情景中取较差的预期对数增长；紫色曲线预先知道真实状态，只是不可实施的信息价值参照。三条策略的普通输赢在给定状态下独立，尾部冲击同时影响全部策略。这里没有模拟未成交、跨期持仓和调仓滑点，不能把组合结果当作回测或收益预测。</p></section>
+
     <section class="lower-section sensitivity-section" aria-labelledby="sensitivityTitle"><div class="section-heading"><div><span class="index">06 / 参数敏感性</span><h2 id="sensitivityTitle">胜率估计与实际胜率</h2><p id="heatDescription">以当前盈亏和成本为固定参照，全凯利估计仓位</p></div><label class="metric-select">颜色指标<select id="heatMetric"><option value="growth">每笔预期对数增长</option><option value="drawdown">严重回撤概率</option></select></label></div><div class="heat-layout"><div class="heat-frame"><div class="y-label">实际胜率 ↑</div><canvas id="heatChart" aria-label="胜率敏感性热力图" role="img"></canvas><div class="x-label">用于计算仓位的估计胜率 →</div></div><div class="heat-aside"><div id="heatLegend" class="legend-scale"></div><p>深红表示不利，青绿表示有利。严重回撤指资金从历史峰值下降至少 50%；按每格 48 条、最多 300 笔路径估算。</p><p>横轴用于定仓，纵轴用于生成结果。两者偏离越大，仓位误配越明显。</p></div></div></section>
 
-    <section class="model-note" aria-labelledby="modelTitle"><div class="section-heading"><div><span class="index">07 / 模型边界</span><h2 id="modelTitle">如何阅读结果</h2></div></div><p id="workedExample"></p><div class="note-columns"><p>基础模式每笔按固定胜率独立抽样；估计误差模式每条路径固定一个后验抽出的真实胜率；市场变化模式按持续概率产生顺风和逆风时段。所有策略共享同一条交易结果。</p><p>两点凯利只使用胜率及两个固定盈亏结果；分布凯利纳入执行波动、成本和设定的极端事件；稳健方法还对定仓胜率作保守折减。三者优化的都是假设分布下的期望对数增长。</p><p id="positionExample"></p></div><p class="model-detail">凯利公式只会对模型内已赋予概率的结果定价，无法自动识别未知黑天鹅。极端事件概率与损失幅度是压力假设，不是已校准的 A 股频率；胜率折减也不是统计可信区间。默认以约 240 个交易日、每天一笔作为一年的近似。市场模式假定当前状态可观察；动态止损不模拟盘口、涨跌停成交或 T+1 可卖性。全部路径都计入统计，包括归零路径，但历史记录的策略筛选和未成交机会仍可能有偏差。结果不是收益预测。</p></section>
+    <section class="model-note" aria-labelledby="modelTitle"><div class="section-heading"><div><span class="index">07 / 模型边界</span><h2 id="modelTitle">如何阅读结果</h2></div></div><p id="workedExample"></p><div class="note-columns"><p>基础模式每笔按固定胜率独立抽样；估计误差模式每条路径固定一个后验抽出的真实胜率；市场变化模式按持续概率产生隐藏状态，并在交易前给出可能误判的信号。所有策略共享同一条交易结果。</p><p>两点凯利只使用胜率及两个固定盈亏结果；分布凯利纳入执行波动、成本和设定的极端事件；稳健方法还对定仓胜率作保守折减。三者优化的都是假设分布下的期望对数增长。</p><p id="positionExample"></p></div><p class="model-detail">凯利公式只会对模型内已赋予概率的结果定价，无法自动识别未知黑天鹅。极端事件概率与损失幅度是压力假设，不是已校准的 A 股频率；胜率折减也不是统计可信区间。默认以约 240 个交易日、每天一笔作为一年的近似。市场模式的信号准确率是用户设定假设，并非历史估计；定仓使用交易前概率，不读取隐藏真实状态。动态止损不模拟盘口、涨跌停成交或 T+1 可卖性。全部路径都计入统计，包括归零路径，但历史记录的策略筛选和未成交机会仍可能有偏差。结果不是收益预测。</p></section>
   </main>
   <footer>仅供仓位与风险关系研究 · 不构成具体交易建议</footer>
 </body>

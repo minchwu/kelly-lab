@@ -39,6 +39,37 @@
     if (hover !== null && hover !== undefined) { const x = xp(hover); ctx.strokeStyle = "#6b817e"; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.setLineDash([]); active.forEach(r => { const d = r.example[hover]; if (!d) return; ctx.fillStyle = r.color; ctx.beginPath(); ctx.arc(x, yp(kind === "equity" ? d.wealth : kind === "risk" ? d.f : d.drawdown), 3.5, 0, Math.PI * 2); ctx.fill(); }); }
     return { left, right, trades };
   }
+  function probabilityChart(canvas, path, trades, hover) {
+    const { ctx, w, h } = setup(canvas), left = 54, right = w - 13, top = 14, bottom = h - 27;
+    grid(ctx, left, top, right, bottom);
+    const colors = ["#147d69", "#246b9b", "#c33e3e"];
+    const xp = i => left + (right - left) * (trades ? i / trades : 0);
+    const yp = p => bottom - p * (bottom - top);
+    [0, .5, 1].forEach(p => text(ctx, `${p * 100}%`, left - 8, yp(p) + 3, "right"));
+    for (let i = 0; i <= 4; i++) text(ctx, String(Math.round(trades * i / 4)), xp(trades * i / 4), h - 7, "center");
+    colors.forEach((color, state) => {
+      ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.beginPath();
+      path.slice(1).forEach((point, i) => { const x = xp(i + 1), y = yp(point.probabilities[state]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.stroke();
+    });
+    if (hover > 0 && path[hover]?.probabilities) {
+      ctx.strokeStyle = "#6b817e"; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(xp(hover), top); ctx.lineTo(xp(hover), bottom); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  function allocationChart(canvas, path, trades) {
+    const { ctx, w, h } = setup(canvas), left = 54, right = w - 13, top = 16, bottom = h - 27;
+    grid(ctx, left, top, right, bottom);
+    const colors = ["#c33e3e", "#246b9b", "#147d69", "#dfe8e5"];
+    const xp = i => left + (right - left) * (trades ? i / trades : 0), yp = p => bottom - p * (bottom - top);
+    for (let band = 0; band < 4; band++) {
+      ctx.beginPath();
+      path.forEach((point, i) => { const weights = point.weights || [0, 0, 0]; const low = weights.slice(0, band).reduce((a, b) => a + b, 0); const high = band === 3 ? 1 : low + weights[band]; if (i) ctx.lineTo(xp(i), yp(high)); else ctx.moveTo(xp(i), yp(high)); });
+      for (let i = path.length - 1; i >= 0; i--) { const low = (path[i].weights || [0, 0, 0]).slice(0, band).reduce((a, b) => a + b, 0); ctx.lineTo(xp(i), yp(low)); }
+      ctx.closePath(); ctx.fillStyle = colors[band]; ctx.globalAlpha = band === 3 ? .65 : .76; ctx.fill(); ctx.globalAlpha = 1;
+    }
+    [0, .5, 1].forEach(p => text(ctx, `${p * 100}%`, left - 8, yp(p) + 3, "right"));
+    for (let i = 0; i <= 4; i++) text(ctx, String(Math.round(trades * i / 4)), xp(trades * i / 4), h - 7, "center");
+  }
   function distribution(canvas, results, initial) {
     const { ctx, w, h } = setup(canvas), left = Math.min(126, w * .3), origin = left + 16, right = w - 24, top = 29, bottom = h - 29;
     const all = results.flatMap(r => r.finals), nonzero = all.filter(v => Number.isFinite(v) && v > 0);
@@ -131,5 +162,5 @@
     for (let i = 0; i <= 10; i += 2) { const p = data.pMin + (data.pMax - data.pMin) * i / 10; text(ctx, `${(p * 100).toFixed(0)}%`, left + (i + .5) * cw, h - 7, "center", "#68787b", 9); const q = data.pMax - (data.pMax - data.pMin) * i / 10; text(ctx, `${(q * 100).toFixed(0)}%`, left - 4, top + (i + .5) * ch + 3, "right", "#68787b", 9); }
     return { left, top, cw, ch };
   }
-  root.KellyCharts = { lineChart, distribution, histogram, histogramOverlay, growthChart, heatmap };
+  root.KellyCharts = { lineChart, probabilityChart, allocationChart, distribution, histogram, histogramOverlay, growthChart, heatmap };
 })(window);

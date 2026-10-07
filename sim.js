@@ -49,6 +49,49 @@
   function stateParams(config, stateIndex = 1) {
     return config.mode === "market" ? config.states[stateIndex] : { p: config.p, win: config.win, loss: config.stop };
   }
+  function transition(config, probabilities) {
+    return probabilities.map((_, target) => probabilities.reduce((sum, probability, source) =>
+      sum + probability * (source === target ? config.states[source].stay : (1 - config.states[source].stay) / 2), 0));
+  }
+  function stationary(config) {
+    let probabilities = [1 / 3, 1 / 3, 1 / 3];
+    for (let i = 0; i < 160; i++) probabilities = transition(config, probabilities);
+    return probabilities;
+  }
+  function observe(prior, signal, accuracy) {
+    const weights = prior.map((p, i) => p * (i === signal ? accuracy : (1 - accuracy) / 2));
+    const total = weights.reduce((a, b) => a + b, 0);
+    return total > 0 ? weights.map(w => w / total) : prior.slice();
+  }
+  function drawIndex(probabilities, random) {
+    let value = random();
+    for (let i = 0; i < probabilities.length - 1; i++) { value -= probabilities[i]; if (value < 0) return i; }
+    return probabilities.length - 1;
+  }
+  function marketReference(config, probabilities, refs, grids) {
+    const p = probabilities.reduce((sum, q, i) => sum + q * refs[i].p, 0);
+    const gain = probabilities.reduce((sum, q, i) => sum + q * refs[i].gain, 0);
+    const loss = probabilities.reduce((sum, q, i) => sum + q * refs[i].loss, 0);
+    const binaryDerivative = amount => probabilities.reduce((sum, q, i) =>
+      sum + q * (refs[i].p * refs[i].gain / (1 + amount * refs[i].gain) -
+        (1 - refs[i].p) * refs[i].loss / (1 - amount * refs[i].loss)), 0);
+    const derivative = (amount, robust) => probabilities.reduce((sum, q, i) => {
+      const stateP = robust ? refs[i].conservativeP : refs[i].p, grid = grids[i];
+      const regular = stateP * grid.wins.reduce((s, x) => s + x.weight * x.r / (1 + amount * x.r), 0) +
+        (1 - stateP) * grid.losses.reduce((s, x) => s + x.weight * x.r / (1 + amount * x.r), 0);
+      return sum + q * ((1 - grid.tailProbability) * regular + grid.tailProbability * grid.tailReturn / (1 + amount * grid.tailReturn));
+    }, 0);
+    const solve = fn => {
+      if (fn(0) <= 0) return 0;
+      if (fn(1 - 1e-12) >= 0) return 1;
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (fn(mid) > 0) lo = mid; else hi = mid; }
+      return (lo + hi) / 2;
+    };
+    const allocation = solve(binaryDerivative), practical = solve(amount => derivative(amount, false)), robust = solve(amount => derivative(amount, true));
+    const selected = config.kellyMethod === "twoPoint" ? allocation : config.kellyMethod === "robust" ? robust : practical;
+    return { p, gain, loss, allocation, practical, robust, selected, probabilities };
+  }
   function reference(config, stateIndex = 1) {
     const state = stateParams(config, stateIndex);
     let p = state.p, posterior;
@@ -84,18 +127,36 @@
   }
   function* scenarioIterator(config) {
     const random = rng(config.seed), refs = config.mode === "market" ? [0, 1, 2].map(i => reference(config, i)) : [reference(config)];
+    const grids = config.mode === "market" ? config.states.map(state => outcomeGrid(config, state)) : null;
+    const cache = new Map(), starting = config.mode === "market" ? stationary(config) : null;
     for (let run = 0; run < config.runs; run++) {
       const trueP = config.mode === "estimate" ? beta(refs[0].posterior.a, refs[0].posterior.b, random) : config.p;
-      let marketState = 1;
+      let marketState = config.mode === "market" ? drawIndex(starting, random) : 1;
+      let prior = starting;
       const events = [];
       for (let i = 0; i < config.trades; i++) {
-        const state = stateParams(config, marketState), estimate = refs[config.mode === "market" ? marketState : 0];
+        const state = stateParams(config, marketState);
+        let estimate = refs[0], signal = null, probabilities = null;
+        if (config.mode === "market") {
+          const accuracy = config.signalAccuracy ?? 1;
+          const signalDraw = random(), alternateDraw = random();
+          signal = signalDraw < accuracy ? marketState : [0, 1, 2].filter(x => x !== marketState)[alternateDraw < .5 ? 0 : 1];
+          probabilities = observe(prior, signal, accuracy);
+          const bucket = probabilities.map(x => Math.round(x * 100)), key = bucket.join(":");
+          if (!cache.has(key)) { const total = bucket.reduce((a, b) => a + b, 0); cache.set(key, marketReference(config, bucket.map(x => x / total), refs, grids)); }
+          estimate = cache.get(key);
+        }
         const tail = config.tailProbability > 0 && random() < config.tailProbability;
         const won = !tail && random() < (config.mode === "market" ? state.p : trueP);
-        events.push({ r: tail ? -config.tailLoss : drawOutcome(config, state, won, random), won, tail, state: marketState, estimated: estimate.selected, estimatedLoss: estimate.loss });
+        events.push({ r: tail ? -config.tailLoss : drawOutcome(config, state, won, random), won, tail, state: marketState, signal, probabilities, estimated: estimate.selected, estimatedLoss: estimate.loss });
         if (config.mode === "market" && random() > state.stay) {
           const other = [0, 1, 2].filter(x => x !== marketState);
           marketState = other[random() < .5 ? 0 : 1];
+        }
+        if (config.mode === "market") {
+          const informed = tail ? probabilities : probabilities.map((q, index) => q * (won ? config.states[index].p : 1 - config.states[index].p));
+          const total = informed.reduce((a, b) => a + b, 0);
+          prior = transition(config, total > 0 ? informed.map(q => q / total) : probabilities);
         }
       }
       yield { events, trueP };
@@ -186,7 +247,7 @@
           state.worst = Math.max(state.worst, drawdown);
           if (state.logWealth < Math.log(config.initial / 2)) state.halved = true;
           if (state.logWealth > 700) result.clipped = true;
-          if (state.path) state.path.push({ wealth: state.ruined ? 0 : Math.exp(Math.min(state.logWealth, 700)), drawdown, r: event.r, tail: event.tail, f, risk: f * event.estimatedLoss, state: event.state });
+          if (state.path) state.path.push({ wealth: state.ruined ? 0 : Math.exp(Math.min(state.logWealth, 700)), drawdown, r: event.r, tail: event.tail, f, risk: f * event.estimatedLoss, state: event.state, signal: event.signal, probabilities: event.probabilities });
         });
       }
       states.forEach((state, i) => {
@@ -245,6 +306,6 @@
     }
     return { cells, pMin, pMax };
   }
-  root.KellySim = { rng, beta, betaQuantile, kelly, practicalKelly, outcomeGrid, finalHistogram, idealKellyCurve, quantile, strategies, reference, maxLoss, drawOutcome, generate, allocation, evaluate, simulate, sensitivity, growthCurve };
+  root.KellySim = { rng, beta, betaQuantile, kelly, practicalKelly, outcomeGrid, transition, stationary, observe, marketReference, finalHistogram, idealKellyCurve, quantile, strategies, reference, maxLoss, drawOutcome, scenarioIterator, generate, allocation, evaluate, simulate, sensitivity, growthCurve };
   if (typeof module !== "undefined") module.exports = root.KellySim;
 })(typeof window !== "undefined" ? window : globalThis);

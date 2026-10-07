@@ -70,15 +70,37 @@ test("posterior mean sets size while each path draws one possible true win rate"
   close(paths[0].events[0].estimated, ref.practical);
 });
 
-test("market state changes use only observed state inputs for allocation", () => {
-  const config = { ...base, mode: "market", states: [
+test("market sizing uses pretrade beliefs rather than the hidden state", () => {
+  const config = { ...base, mode: "market", signalAccuracy: .34, trades: 40, states: [
     { p: .75, win: .18, loss: .08, stay: 0 },
     { p: .6, win: .15, loss: .1, stay: 0 },
     { p: .35, win: .08, loss: .12, stay: 0 }
   ] };
   const path = S.generate({ ...config, runs: 1 })[0];
-  assert.equal(path.events[0].state, 1);
-  for (const event of path.events) close(event.estimated, S.reference(config, event.state).practical);
+  const refs = config.states.map((_, i) => S.reference(config, i));
+  const grids = config.states.map(state => S.outcomeGrid(config, state));
+  for (const event of path.events) {
+    close(event.probabilities.reduce((a, b) => a + b, 0), 1);
+    const bucket = event.probabilities.map(p => Math.round(p * 100)), total = bucket.reduce((a, b) => a + b, 0);
+    close(event.estimated, S.marketReference(config, bucket.map(x => x / total), refs, grids).practical);
+    assert.ok(event.probabilities.every(q => q > 0 && q < 1));
+  }
+  assert.ok(path.events.some(event => event.signal !== event.state));
+  const perfect = S.generate({ ...config, signalAccuracy: 1, runs: 1 })[0];
+  for (const event of perfect.events) {
+    assert.equal(event.signal, event.state);
+    close(event.estimated, S.reference({ ...config, signalAccuracy: 1 }, event.state).practical);
+  }
+});
+
+test("state filter uses the known transition matrix and signal likelihood", () => {
+  const config = { states: [{ stay: .6 }, { stay: .8 }, { stay: .9 }] };
+  const next = S.transition(config, [0, 1, 0]);
+  next.forEach((p, i) => close(p, [.1, .8, .1][i]));
+  const posterior = S.observe(next, 0, .7);
+  assert.ok(posterior[0] > next[0]);
+  close(posterior.reduce((a, b) => a + b, 0), 1);
+  assert.deepEqual(S.observe(next, 1, 1), [0, 1, 0]);
 });
 
 test("practical Kelly maximizes the configured return distribution inside the unlevered range", () => {

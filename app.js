@@ -1,22 +1,56 @@
 (function () {
   "use strict";
-  const S = window.KellySim, C = window.KellyCharts, $ = id => document.getElementById(id);
-  const defaults = { mode: "basic", kellyMethod: "robust", p: .42, win: .10, b: 10 / 7, stop: .07, trades: 240, initial: 10000, runs: 500, seed: 2047, cap: .05, superMultiplier: 1.25, history: 100, wins: 42, cost: .001, slippage: .005, trailCoverage: .3, tightStop: .03, variation: .1, tailProbability: .02, tailLoss: .6, winRateMargin: .05, states: [{ p: .60, win: .10, loss: .055, stay: .65 }, { p: .42, win: .08, loss: .065, stay: .78 }, { p: .32, win: .06, loss: .08, stay: .90 }] };
+  const S = window.KellySim, P = window.KellyPortfolio, C = window.KellyCharts, $ = id => document.getElementById(id);
+  const defaults = { mode: "basic", kellyMethod: "robust", p: .42, win: .10, b: 10 / 7, stop: .07, trades: 240, initial: 10000, runs: 500, seed: 2047, cap: .05, superMultiplier: 1.25, history: 100, wins: 42, cost: .001, slippage: .005, trailCoverage: .3, tightStop: .03, variation: .1, tailProbability: .02, tailLoss: .6, winRateMargin: .05, signalAccuracy: .7, states: [{ p: .60, win: .10, loss: .055, stay: .65 }, { p: .42, win: .08, loss: .065, stay: .78 }, { p: .32, win: .06, loss: .08, stay: .90 }] };
   const presets = {
     small: { p: .55, win: .12, stop: .1, history: 100, wins: 55, states: [{ p: .64, win: .15, loss: .08, stay: .8 }, { p: .54, win: .12, loss: .1, stay: .72 }, { p: .4, win: .08, loss: .12, stay: .84 }] },
     high: { p: .75, win: .08, stop: .1, history: 100, wins: 75, states: [{ p: .81, win: .1, loss: .08, stay: .8 }, { p: .74, win: .08, loss: .1, stay: .72 }, { p: .62, win: .06, loss: .12, stay: .84 }] },
     low: { p: .36, win: .22, stop: .08, history: 100, wins: 36, states: [{ p: .44, win: .27, loss: .07, stay: .8 }, { p: .35, win: .22, loss: .08, stay: .72 }, { p: .25, win: .16, loss: .1, stay: .84 }] },
     over: { p: .6, win: .08, stop: .1, history: 20, wins: 15, states: [{ p: .58, win: .11, loss: .09, stay: .8 }, { p: .48, win: .08, loss: .1, stay: .72 }, { p: .35, win: .06, loss: .13, stay: .88 }] }
   };
-  let config = structuredClone(defaults), results = null, heatData = null, scale = "log", metric = "growth", hover = null, timer = null, focused = "full";
+  const portfolioDefaults = { totalMax: 1, ambiguity: .15, fixed: [.15, .25, .25], max: [.5, .5, .5], wave: { p: [.62, .52, .4], win: .07, loss: .05, tailLoss: .35 }, trend: { p: [.58, .5, .38], win: .1, loss: .065, tailLoss: .25 } };
+  let config = structuredClone(defaults), portfolio = structuredClone(portfolioDefaults), portfolioResults = null, results = null, heatData = null, scale = "log", metric = "growth", hover = null, timer = null, focused = "full";
   const visibility = Object.fromEntries(S.strategies.map(x => [x.id, true]));
   const percent = v => `${(v * 100).toFixed(1)}%`;
   const money = v => !Number.isFinite(v) ? "—" : v >= Math.exp(700) ? "≥¥1.01×10³⁰⁴" : v >= 1e12 ? `¥${v.toExponential(2)}` : `¥${v.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}`;
   const specs = {
     p: ["胜率 p", 1, 99, 1, "%", 100], win: ["平均盈利", .5, 100, .5, "%", 100], stop: ["计划亏损 / 止损", .5, 50, .5, "%", 100], b: ["毛盈亏比 b", .05, 200, .05, "倍", 1], history: ["历史交易笔数", 0, 2000, 1, "笔", 1], wins: ["其中盈利笔数", 0, 2000, 1, "笔", 1],
-    trades: ["交易次数", 0, 20000, 1, "笔", 1], initial: ["初始资金", 1000, 10000000, 1000, "元", 1], runs: ["重复模拟次数", 20, 5000, 10, "次", 1], seed: ["随机种子", 0, 4294967295, 1, "", 1], cap: ["每笔计划账户风险上限", .5, 50, .5, "%", 100], superMultiplier: ["超凯利倍数", 1.05, 3, .05, "倍", 1], cost: ["往返交易成本", 0, 2, .05, "%", 100], slippage: ["亏损执行额外滑点上限", 0, 20, .5, "%", 100], trailCoverage: ["亏损单止损收紧覆盖率", 0, 100, 1, "%", 100], tightStop: ["收紧后亏损幅度", .1, 50, .1, "%", 100], variation: ["盈亏幅度波动", 0, 50, 1, "%", 100], tailProbability: ["单笔极端事件概率", 0, 20, .1, "%", 100], tailLoss: ["极端事件标的净跌幅", 1, 100, 1, "%", 100], winRateMargin: ["胜率保守折减", 0, 30, .5, "百分点", 100]
+    trades: ["交易次数", 0, 20000, 1, "笔", 1], initial: ["初始资金", 1000, 10000000, 1000, "元", 1], runs: ["重复模拟次数", 20, 5000, 10, "次", 1], seed: ["随机种子", 0, 4294967295, 1, "", 1], cap: ["每笔计划账户风险上限", .5, 50, .5, "%", 100], superMultiplier: ["超凯利倍数", 1.05, 3, .05, "倍", 1], cost: ["往返交易成本", 0, 2, .05, "%", 100], slippage: ["亏损执行额外滑点上限", 0, 20, .5, "%", 100], trailCoverage: ["亏损单止损收紧覆盖率", 0, 100, 1, "%", 100], tightStop: ["收紧后亏损幅度", .1, 50, .1, "%", 100], variation: ["盈亏幅度波动", 0, 50, 1, "%", 100], tailProbability: ["单笔极端事件概率", 0, 20, .1, "%", 100], tailLoss: ["极端事件标的净跌幅", 1, 100, 1, "%", 100], winRateMargin: ["胜率保守折减", 0, 30, .5, "百分点", 100], signalAccuracy: ["交易前信号准确率", 34, 100, 1, "%", 100]
   };
   const stateNames = ["顺风", "普通", "逆风"];
+  function portfolioModel() {
+    return { totalMax: portfolio.totalMax, ambiguity: portfolio.ambiguity, fixed: portfolio.fixed,
+      strategies: [
+        { p: config.states.map(s => s.p), win: config.states.map((_, i) => S.reference(config, i).gain + config.cost), loss: config.states.map((_, i) => S.reference(config, i).loss - config.cost), tailLoss: config.tailLoss, max: portfolio.max[0] },
+        ...["wave", "trend"].map((key, i) => ({ p: portfolio[key].p, win: Array(3).fill(portfolio[key].win), loss: Array(3).fill(portfolio[key].loss), tailLoss: portfolio[key].tailLoss, max: portfolio.max[i + 1] }))
+      ] };
+  }
+  function portfolioInput(key, label, value, min, max, step = 1) {
+    return `<label><span>${label}</span><span class="portfolio-number"><input data-pf="${key}" type="number" min="${min}" max="${max}" step="${step}" value="${+(value * 100).toFixed(2)}" aria-label="${label}"><em>%</em></span></label>`;
+  }
+  function buildPortfolioControls() {
+    $("portfolioControls").innerHTML = `<div class="portfolio-limits">${portfolioInput("totalMax", "总买入仓位上限", portfolio.totalMax, 10, 100)}${portfolioInput("ambiguity", "顺风概率不利偏移", portfolio.ambiguity, 0, 50)}</div><div class="portfolio-grid"><div class="portfolio-grid-head"><span>策略</span><span>顺风胜率</span><span>普通胜率</span><span>逆风胜率</span><span>平均盈利</span><span>平均亏损</span><span>共同冲击损失</span><span>单项上限</span><span>固定配置</span></div>${["打板", "波段", "趋势"].map((name, i) => {
+      const strategy = i === 0 ? { p: config.states.map(s => s.p), win: config.states[1].win, loss: config.states[1].loss, tailLoss: config.tailLoss } : portfolio[i === 1 ? "wave" : "trend"];
+      const key = i === 1 ? "wave" : "trend";
+      return `<div class="portfolio-grid-row"><strong>${name}</strong>${strategy.p.map((p, state) => i === 0 ? `<span class="portfolio-linked">${percent(p)}</span>` : portfolioInput(`${key}.p.${state}`, `${name}${stateNames[state]}胜率`, p, 1, 99)).join("")}${i === 0 ? `<span class="portfolio-linked">随市场状态</span><span class="portfolio-linked">随市场状态</span><span class="portfolio-linked">${percent(config.tailLoss)}</span>` : portfolioInput(`${key}.win`, `${name}平均盈利`, strategy.win, .5, 50, .5) + portfolioInput(`${key}.loss`, `${name}平均亏损`, strategy.loss, .5, 50, .5) + portfolioInput(`${key}.tailLoss`, `${name}共同冲击损失`, strategy.tailLoss, 1, 100)}${portfolioInput(`max.${i}`, `${name}单项上限`, portfolio.max[i], 0, 100)}${portfolioInput(`fixed.${i}`, `${name}固定配置`, portfolio.fixed[i], 0, 100)}</div>`;
+    }).join("")}</div>`;
+    $("portfolioControls").querySelectorAll("[data-pf]").forEach(input => input.addEventListener("input", e => {
+      const path = e.target.dataset.pf.split(".");
+      let target = portfolio;
+      for (let i = 0; i < path.length - 1; i++) target = target[path[i]];
+      target[path.at(-1)] = e.target.value === "" ? NaN : Number(e.target.value) / 100;
+      schedule();
+    }));
+  }
+  function validatePortfolio() {
+    const model = portfolioModel();
+    const values = [portfolio.totalMax, portfolio.ambiguity, ...portfolio.max, ...portfolio.fixed, ...model.strategies.flatMap(s => [...s.p, ...s.win, ...s.loss, s.tailLoss])];
+    if (values.some(x => !Number.isFinite(x) || x < 0 || x > 1)) return "组合参数须在 0%–100% 之间。";
+    if (portfolio.totalMax < .1 || portfolio.ambiguity > .5) return "总仓位上限至少 10%，不利偏移最多 50 个百分点。";
+    if (portfolio.fixed.some((x, i) => x > portfolio.max[i]) || portfolio.fixed.reduce((a, b) => a + b, 0) > portfolio.totalMax + 1e-10) return "固定配置须满足单项上限和总买入仓位上限。";
+    if (model.strategies.some(s => s.p.some(p => p < .01 || p > .99) || s.win.some(v => v < .005) || s.loss.some(v => v < .005) || s.tailLoss < .01) || [portfolio.wave, portfolio.trend].some(s => s.win > .5 || s.loss > .5)) return "策略胜率需为 1%–99%；波段与趋势的平均盈亏幅度为 0.5%–50%，共同冲击损失至少 1%。";
+    return "";
+  }
   function get(key) { if (key.startsWith("states.")) { const [, i, field] = key.split("."); return config.states[+i][field]; } return config[key]; }
   function set(key, value) { if (key.startsWith("states.")) { const [, i, field] = key.split("."); config.states[+i][field] = value; } else config[key] = value; }
   function field(key, label, min, max, step, unit, factor, slider = true) {
@@ -27,7 +61,7 @@
   function buildFields() {
     $("basicFields").innerHTML = field("p", ...specs.p) + field("win", ...specs.win) + field("stop", ...specs.stop) + field("b", ...specs.b) + `<p class="field-hint">平均盈利 ÷ 计划亏损；改动任一项会同步更新</p>`;
     $("estimateFields").innerHTML = field("history", ...specs.history) + field("wins", ...specs.wins) + field("win", ...specs.win) + field("stop", ...specs.stop) + field("b", ...specs.b);
-    $("marketFields").innerHTML = config.states.map((state, i) => `<div class="state-group"><h3>${stateNames[i]}状态</h3>${field(`states.${i}.p`, "胜率", 1, 99, 1, "%", 100)}${field(`states.${i}.win`, "平均盈利", .5, 100, .5, "%", 100)}${field(`states.${i}.loss`, "平均亏损", .5, 50, .5, "%", 100)}${field(`states.${i}.stay`, "持续倾向", 0, 99, 1, "%", 100)}<p class="field-hint">本状态在下一笔继续保持的概率；否则等概率转入另两种状态。</p></div>`).join("");
+    $("marketFields").innerHTML = field("signalAccuracy", ...specs.signalAccuracy) + `<p class="field-hint">信号在交易前出现；准确率指信号与隐藏真实状态一致的概率，误判时等概率指向另两种状态。</p>` + config.states.map((state, i) => `<div class="state-group"><h3>${stateNames[i]}状态</h3>${field(`states.${i}.p`, "胜率", 1, 99, 1, "%", 100)}${field(`states.${i}.win`, "平均盈利", .5, 100, .5, "%", 100)}${field(`states.${i}.loss`, "平均亏损", .5, 50, .5, "%", 100)}${field(`states.${i}.stay`, "持续倾向", 0, 99, 1, "%", 100)}<p class="field-hint">本状态在下一笔继续保持的概率；否则等概率转入另两种状态。</p></div>`).join("");
     $("commonFields").innerHTML = `<label class="field"><span>凯利计算方法</span><select data-key="kellyMethod" aria-label="凯利计算方法"><option value="twoPoint" ${config.kellyMethod === "twoPoint" ? "selected" : ""}>经典两点（忽略尾部风险定仓）</option><option value="distribution" ${config.kellyMethod === "distribution" ? "selected" : ""}>分布凯利（含尾部事件）</option><option value="robust" ${config.kellyMethod === "robust" ? "selected" : ""}>稳健分布凯利（尾部 + 胜率折减）</option></select><small>方法只改变定仓；三种方法的交易结果均含设定的尾部事件</small></label>` + field("trades", ...specs.trades) + `<p class="field-hint">默认约为一年 240 个交易日、每天一笔；实际交易频率可修改</p>` + field("initial", ...specs.initial) + field("runs", ...specs.runs) + `<p class="field-hint">交易次数 × 重复次数最多 500 万笔；增加重复次数仅降低抽样噪声</p>` + field("seed", ...specs.seed, false) + `<p class="field-hint">种子固定可复现同一批随机路径；换种子不改变设定的胜率或盈亏分布</p>` + field("cap", ...specs.cap) + `<p class="field-hint">按常规估计亏损控制；极端事件可能突破计划风险</p>` + field("superMultiplier", ...specs.superMultiplier) + field("cost", ...specs.cost) + field("slippage", ...specs.slippage) + field("trailCoverage", ...specs.trailCoverage) + field("tightStop", ...specs.tightStop) + field("variation", ...specs.variation) + `<div class="divider"></div><h3 class="risk-heading">尾部风险与估计误差</h3>` + field("tailProbability", ...specs.tailProbability) + field("tailLoss", ...specs.tailLoss) + field("winRateMargin", ...specs.winRateMargin) + `<p class="field-hint">极端事件覆盖普通输赢结果；胜率折减仅用于稳健方法定仓，不改变真实结果抽样。</p>`;
     document.querySelectorAll("[data-key]").forEach(input => input.addEventListener("input", onField));
     document.querySelectorAll("#modeTabs button").forEach(button => button.classList.toggle("active", button.dataset.mode === config.mode));
@@ -48,7 +82,7 @@
   }
   function validate() {
     const keys = config.mode === "basic" ? ["p", "win", "stop", "b"] : config.mode === "estimate" ? ["history", "wins", "win", "stop", "b"] : [];
-    const common = ["trades", "initial", "runs", "seed", "cap", "superMultiplier", "cost", "slippage", "trailCoverage", "tightStop", "variation", "tailProbability", "tailLoss", "winRateMargin"];
+    const common = ["trades", "initial", "runs", "seed", "cap", "superMultiplier", "cost", "slippage", "trailCoverage", "tightStop", "variation", "tailProbability", "tailLoss", "winRateMargin", "signalAccuracy"];
     for (const key of [...keys, ...common]) { const s = specs[key], v = get(key) * s[5]; if (!Number.isFinite(v) || v < s[1] - 1e-8 || v > s[2] + 1e-8 || (["history", "wins", "trades", "runs", "seed", "initial"].includes(key) && !Number.isInteger(v))) return `${s[0]}请输入 ${s[1]}–${s[2]}${s[4]}范围内的有效值。`; }
     if (config.wins > config.history && config.mode === "estimate") return "盈利笔数不能超过历史交易笔数。";
     if (config.trades * config.runs > 5000000) return "单次最多处理 500 万笔交易结果；请降低交易次数或重复模拟次数。";
@@ -61,6 +95,15 @@
     if (error) { notice.className = "notice error"; notice.textContent = error; return; }
     results = S.simulate(config);
     heatData = S.sensitivity(config, metric);
+    $("portfolioPanel").classList.toggle("hidden", config.mode !== "market");
+    if (config.mode === "market") {
+      const linked = $("portfolioControls").querySelectorAll(".portfolio-linked");
+      config.states.forEach((state, i) => { if (linked[i]) linked[i].textContent = percent(state.p); });
+      if (linked[5]) linked[5].textContent = percent(config.tailLoss);
+      const portfolioError = validatePortfolio();
+      $("portfolioStatus").textContent = portfolioError || "配置只使用交易前信息；固定种子下各规则共享相同市场与策略结果。";
+      portfolioResults = portfolioError ? null : P.simulate(config, portfolioModel());
+    } else portfolioResults = null;
     notice.className = "notice";
     const messages = [];
     if (results.reference.selected <= 0) messages.push("当前方法下估计的边际对数增长不为正，凯利策略选择 0% 观望；固定风险 1% 与满仓仍承担风险。");
@@ -77,14 +120,18 @@
     render();
   }
   function render() {
-    const ref = results.reference;
+    const first = config.mode === "market" && config.trades ? results.strategies[0].example[1] : null;
+    const bucket = first?.probabilities.map(p => Math.round(p * 100)), bucketTotal = bucket?.reduce((a, b) => a + b, 0);
+    const ref = first ? S.marketReference(config, bucket.map(x => x / bucketTotal), config.states.map((_, i) => S.reference(config, i)), config.states.map(state => S.outcomeGrid(config, state))) : results.reference;
+    results.displayReference = ref;
     const fullAllocation = S.allocation({ id: "full", factor: 1 }, { estimated: ref.selected, estimatedLoss: ref.loss }, config);
     const methodName = { twoPoint: "经典两点", distribution: "分布", robust: "稳健分布" }[config.kellyMethod];
-    $("kellyLabel").textContent = `${methodName}凯利模型买入占比${config.mode === "market" ? " · 普通状态" : ""}`;
+    $("kellyLabel").textContent = `${methodName}凯利模型买入占比${config.mode === "market" ? " · 示例路径首笔信号" : ""}`;
     $("kellyValue").textContent = percent(ref.selected);
     $("kellyContext").textContent = `经典两点 ${percent(ref.allocation)} · 含尾部分布 ${percent(ref.practical)} · 胜率折减后 ${percent(ref.robust)} · 计划风险约束后全凯利 ${percent(fullAllocation)}${config.mode === "estimate" ? " · 按历史后验定仓" : ""}`;
     $("stateDiagnostics").classList.toggle("hidden", config.mode !== "market");
-    if (config.mode === "market") $("stateDiagnostics").innerHTML = `<h3>各状态的买入仓位</h3><div class="state-table-wrap"><table><thead><tr><th>状态</th><th>两点</th><th>含尾部分布</th><th>稳健</th><th>实际全凯利</th></tr></thead><tbody>${config.states.map((_, i) => { const stateRef = S.reference(config, i); const actual = S.allocation({ id: "full", factor: 1 }, { estimated: stateRef.selected, estimatedLoss: stateRef.loss }, config); return `<tr><td>${stateNames[i]}</td><td>${percent(stateRef.allocation)}</td><td>${percent(stateRef.practical)}</td><td>${percent(stateRef.robust)}</td><td>${percent(actual)}</td></tr>`; }).join("")}</tbody></table></div><p>0% 表示该假设下边际增长不为正；100% 表示无杠杆搜索边界，实际仓位仍受计划风险上限约束。</p>`;
+    $("probabilityPanel").classList.toggle("hidden", config.mode !== "market");
+    if (config.mode === "market") $("stateDiagnostics").innerHTML = `<h3>交易前状态判断</h3><p>${first ? `首笔信号：${stateNames[first.signal]}；估计概率：顺风 ${percent(first.probabilities[0])}、普通 ${percent(first.probabilities[1])}、逆风 ${percent(first.probabilities[2])}。事后真实状态：${stateNames[first.state]}。` : "零交易，无交易前信号。"}</p><div class="state-table-wrap"><table><thead><tr><th>假设单一状态</th><th>两点</th><th>含尾部分布</th><th>稳健</th></tr></thead><tbody>${config.states.map((_, i) => { const stateRef = S.reference(config, i); return `<tr><td>${stateNames[i]}</td><td>${percent(stateRef.allocation)}</td><td>${percent(stateRef.practical)}</td><td>${percent(stateRef.robust)}</td></tr>`; }).join("")}</tbody></table></div><p>上表是单一状态条件参考；实际按交易前概率混合求解。两点列可能超过 100%，表示需要杠杆的理论值；分布列最多搜索到无杠杆边界。</p>`;
     $("posterior").classList.toggle("hidden", config.mode !== "estimate");
     if (config.mode === "estimate") $("posterior").innerHTML = `胜率后验 Beta(${ref.posterior.a}, ${ref.posterior.b})<br><strong>估计 ${percent(ref.p)}</strong> · 95% 可信区间 ${percent(ref.posterior.low)}–${percent(ref.posterior.high)}`;
     $("runCount").textContent = `${config.runs} 次`;
@@ -92,10 +139,10 @@
     $("distributionStats").innerHTML = results.strategies.map(r => `<tr class="${focused === r.id ? "selected" : ""}"><td><i class="strategy-dot" style="--color:${r.color}"></i>${r.name}</td><td>${money(r.mean)}</td><td>${money(r.q05)}</td><td>${money(r.q50)}</td><td>${money(r.q95)}</td><td>${percent(r.halfRate)}</td><td>${percent(r.ruinRate)}</td></tr>`).join("");
     $("legend").innerHTML = results.strategies.map(r => `<button type="button" data-strategy="${r.id}" class="${visibility[r.id] ? "" : "off"} ${focused === r.id ? "focused" : ""}" aria-pressed="${visibility[r.id]}" title="显示或隐藏${r.name}"><svg width="25" height="8" aria-hidden="true"><line x1="1" y1="4" x2="24" y2="4" stroke="${r.color}" stroke-width="3" ${r.dash.length ? `stroke-dasharray="${r.dash.join(" ")}"` : ""}/></svg>${r.name}</button>`).join("");
     $("legend").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { visibility[b.dataset.strategy] = !visibility[b.dataset.strategy]; renderPathCharts(); renderLegend(); }));
-    const gross = config.mode === "market" ? config.states[1] : { win: config.win, loss: config.stop };
-    $("workedExample").textContent = `当前参照：胜率 ${percent(ref.p)}，平均盈利 ${percent(gross.win)}，计划亏损 ${percent(gross.loss)}，毛盈亏比 ${(gross.win / gross.loss).toFixed(2)}。计入止损收紧、预期滑点和成本后，估计普通盈利 ${percent(ref.gain)}、普通亏损 ${percent(ref.loss)}。另设每笔 ${percent(config.tailProbability)} 概率净跌 ${percent(config.tailLoss)}；${config.trades} 笔中的预期事件数为 ${(config.trades * config.tailProbability).toFixed(1)}，仅是情景参数的算术结果。`;
+    const gross = config.mode === "market" && first ? { win: config.states.reduce((sum, state, i) => sum + first.probabilities[i] * state.win, 0), loss: config.states.reduce((sum, state, i) => sum + first.probabilities[i] * state.loss, 0) } : config.mode === "market" ? config.states[1] : { win: config.win, loss: config.stop };
+    $("workedExample").textContent = `${config.mode === "market" && first ? "首笔交易前概率加权参照" : "当前参照"}：胜率 ${percent(ref.p)}，平均盈利 ${percent(gross.win)}，计划亏损 ${percent(gross.loss)}，毛盈亏比 ${(gross.win / gross.loss).toFixed(2)}。计入止损收紧、预期滑点和成本后，估计普通盈利 ${percent(ref.gain)}、普通亏损 ${percent(ref.loss)}。另设每笔 ${percent(config.tailProbability)} 概率净跌 ${percent(config.tailLoss)}；${config.trades} 笔中的预期事件数为 ${(config.trades * config.tailProbability).toFixed(1)}，仅是情景参数的算术结果。`;
     $("positionExample").textContent = `仓位是买入金额占账户资金比例。当前${methodName}解 ${percent(ref.selected)}，计划账户风险上限 ${percent(config.cap)}，实际全凯利买入 ${percent(fullAllocation)}。极端事件可突破计划止损；满仓遇标的净跌 ${percent(config.tailLoss)} 时，账户也约跌 ${percent(config.tailLoss)}。`;
-    $("pathInsight").textContent = config.trades ? `首条路径：${config.trades} 笔中判定盈利 ${results.exampleWins} 笔（${percent(results.exampleWins / config.trades)}），极端事件 ${results.exampleTailEvents} 笔，最长连续亏损 ${results.exampleLongestLoss} 笔。${config.mode === "market" ? "状态有持续性，可能出现连续逆风。" : config.mode === "estimate" ? "本路径真实胜率由后验抽取后固定。" : "每笔普通输赢独立抽样，连续亏损仍可能发生。"}` : "零交易：资金保持初始值。";
+    $("pathInsight").textContent = config.trades ? `首条路径：${config.trades} 笔中判定盈利 ${results.exampleWins} 笔（${percent(results.exampleWins / config.trades)}），极端事件 ${results.exampleTailEvents} 笔，最长连续亏损 ${results.exampleLongestLoss} 笔。${config.mode === "market" ? "状态有持续性；仓位只依据信号更新后的概率。" : config.mode === "estimate" ? "本路径真实胜率由后验抽取后固定。" : "每笔普通输赢独立抽样，连续亏损仍可能发生。"}` : "零交易：资金保持初始值。";
     $("focusStrategy").innerHTML = results.strategies.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
     $("focusStrategy").value = focused;
     $("growthBest").textContent = results.growth.sampleCount ? `样本内峰值 ${percent(results.growth.best.allocation)} 仓位` : "暂无交易样本";
@@ -103,6 +150,14 @@
     $("heatDescription").textContent = config.mode === "market" ? "以普通状态及当前执行假设为参照，横轴按全凯利估计仓位" : "以当前盈亏幅度、动态止损、滑点和成本为参照，横轴按全凯利估计仓位";
     $("heatLegend").innerHTML = `<div class="heat-legend"></div><div class="heat-legend-label"><span>${metric === "growth" ? "较低增长" : "较高风险"}</span><span>${metric === "growth" ? "较高增长" : "较低风险"}</span></div>`;
     renderCharts();
+    renderPortfolio();
+  }
+  function renderPortfolio() {
+    if (!portfolioResults || config.mode !== "market") { $("portfolioSummary").innerHTML = ""; return; }
+    $("portfolioSummary").innerHTML = portfolioResults.results.map(r => `<tr><td><i class="strategy-dot" style="--color:${r.color}"></i>${r.name}</td><td>${money(r.q05)}</td><td>${money(r.q50)}</td><td>${money(r.q95)}</td><td>${percent(r.dd50)} / ${percent(r.dd95)}</td></tr>`).join("");
+    $("portfolioLegend").innerHTML = portfolioResults.results.map(r => `<span><i style="--color:${r.color}"></i>${r.name}</span>`).join("") + `<span class="portfolio-allocation-key">打板 · 波段 · 趋势 · 现金</span>`;
+    C.lineChart($("portfolioEquity"), portfolioResults.results.map(r => ({ ...r, visible: true, focused: r.id === "signal" })), config, "equity", scale, null);
+    C.allocationChart($("portfolioAllocation"), portfolioResults.results[1].example, config.trades);
   }
   function renderLegend() { $("legend").querySelectorAll("button").forEach(b => { b.classList.toggle("off", !visibility[b.dataset.strategy]); b.classList.toggle("focused", focused === b.dataset.strategy); b.setAttribute("aria-pressed", visibility[b.dataset.strategy]); }); }
   function renderPathCharts() {
@@ -111,6 +166,7 @@
     C.lineChart($("equityChart"), rows, config, "equity", scale, hover);
     C.lineChart($("riskChart"), rows, config, "risk", scale, hover);
     C.lineChart($("drawdownChart"), rows, config, "drawdown", scale, hover);
+    if (config.mode === "market") C.probabilityChart($("probabilityChart"), results.strategies[0].example, config.trades, hover);
     const full = results.strategies.find(r => r.id === "full");
     const index = config.trades ? Math.max(1, hover || 1) : 0;
     $("riskReadout").textContent = `${config.trades ? `第 ${index} 笔` : "零交易"} · 全凯利买入 ${percent(full.example[index].f)} · 计划风险 ${percent(full.example[index].risk)}`;
@@ -120,7 +176,7 @@
     C.distribution($("distributionChart"), results.strategies, config.initial);
     renderHistogram();
     const full = results.strategies.find(r => r.id === "full");
-    C.growthChart($("growthChart"), { ...results.growth, ideal: results.ideal }, { full: full.example[config.trades ? 1 : 0].f, current: results.reference.selected });
+    C.growthChart($("growthChart"), { ...results.growth, ideal: results.ideal }, { full: full.example[config.trades ? 1 : 0].f, current: results.displayReference.selected });
     C.heatmap($("heatChart"), heatData, metric);
   }
   function renderHistogram() {
@@ -143,18 +199,20 @@
     const sample = rows[0]?.example[hover], eventText = !hover ? "起点" : !sample ? "未选择曲线" : sample.r === null ? "已归零，未再交易" : `${sample.tail ? "极端事件 · " : ""}标的净涨跌 ${sample.r >= 0 ? "+" : ""}${percent(sample.r)}`;
     const tip = canvas === $("riskChart") ? $("riskTip") : $("equityTip");
     $("riskTip").classList.add("hidden"); $("equityTip").classList.add("hidden");
-    tip.innerHTML = `<strong>第 ${hover} 笔 · ${eventText}</strong>` + rows.map(r => { const d = r.example[hover]; return `<span style="color:${r.color}">${r.name} · 买入 ${percent(d.f)} · 计划风险 ${percent(d.risk)}<br>本笔账户 ${d.r === null ? "—" : `${d.f * d.r >= 0 ? "+" : ""}${percent(d.f * d.r)}`} · ${money(d.wealth)} · 回撤 ${percent(d.drawdown)}</span>`; }).join("");
+    tip.innerHTML = `<strong>第 ${hover} 笔 · ${eventText}</strong>${config.mode === "market" && sample?.probabilities ? `<span>交易前信号 ${stateNames[sample.signal]} · 估计顺/普/逆 ${sample.probabilities.map(percent).join(" / ")}<br>事后真实状态 ${stateNames[sample.state]}</span>` : ""}` + rows.map(r => { const d = r.example[hover]; return `<span style="color:${r.color}">${r.name} · 买入 ${percent(d.f)} · 计划风险 ${percent(d.risk)}<br>本笔账户 ${d.r === null ? "—" : `${d.f * d.r >= 0 ? "+" : ""}${percent(d.f * d.r)}`} · ${money(d.wealth)} · 回撤 ${percent(d.drawdown)}</span>`; }).join("");
     tip.classList.remove("hidden"); tip.style.left = `${Math.max(4, Math.min(x + 12, box.width - 235))}px`; tip.style.top = `${Math.max(5, Math.min(event.clientY - box.top - 55, box.height - 28))}px`;
     renderPathCharts();
   }
   function hideTip() { hover = null; $("equityTip").classList.add("hidden"); $("riskTip").classList.add("hidden"); renderPathCharts(); }
   $("modeTabs").addEventListener("click", e => { const m = e.target.dataset.mode; if (!m) return; config.mode = m; buildFields(); update(); });
-  $("scaleTabs").addEventListener("click", e => { const s = e.target.dataset.scale; if (!s) return; scale = s; $("scaleTabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.scale === s)); renderCharts(); });
+  $("scaleTabs").addEventListener("click", e => { const s = e.target.dataset.scale; if (!s) return; scale = s; $("scaleTabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.scale === s)); renderCharts(); renderPortfolio(); });
   $("heatMetric").addEventListener("change", e => { metric = e.target.value; heatData = S.sensitivity(config, metric); render(); });
   $("focusStrategy").addEventListener("change", e => { focused = e.target.value; renderLegend(); renderPathCharts(); renderHistogram(); });
   $("preset").addEventListener("change", e => { if (e.target.value === "custom") return; const p = presets[e.target.value]; Object.assign(config, structuredClone(p)); config.b = config.win / config.stop; buildFields(); update(); });
-  $("reset").addEventListener("click", () => { config = structuredClone(defaults); scale = "log"; metric = "growth"; hover = null; focused = "full"; Object.keys(visibility).forEach(k => visibility[k] = true); $("preset").value = "custom"; $("heatMetric").value = "growth"; $("scaleTabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.scale === "log")); buildFields(); update(); });
+  $("reset").addEventListener("click", () => { config = structuredClone(defaults); portfolio = structuredClone(portfolioDefaults); scale = "log"; metric = "growth"; hover = null; focused = "full"; Object.keys(visibility).forEach(k => visibility[k] = true); $("preset").value = "custom"; $("heatMetric").value = "growth"; $("scaleTabs").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.scale === "log")); buildFields(); buildPortfolioControls(); update(); });
   ["equityChart", "riskChart"].forEach(id => { $(id).addEventListener("mousemove", showTip); $(id).addEventListener("mouseleave", hideTip); });
-  window.addEventListener("resize", () => { clearTimeout(timer); timer = setTimeout(renderCharts, 70); });
-  buildFields(); update();
+  window.addEventListener("resize", () => { clearTimeout(timer); timer = setTimeout(() => { renderCharts(); renderPortfolio(); }, 70); });
+  const requestedMode = new URLSearchParams(location.search).get("mode");
+  if (["basic", "estimate", "market"].includes(requestedMode)) config.mode = requestedMode;
+  buildFields(); buildPortfolioControls(); update();
 })();
