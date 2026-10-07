@@ -90,6 +90,32 @@ test("practical Kelly maximizes the configured return distribution inside the un
   assert.ok(growth(ref.practical) >= growth(Math.min(1, ref.practical + .05)) - 1e-12);
 });
 
+test("tail losses and a conservative win rate reduce sizing without changing realized probabilities", () => {
+  const config = { ...base, mode: "market", kellyMethod: "robust", tailProbability: .02, tailLoss: .6, winRateMargin: .05,
+    states: [{ p: .6, win: .1, loss: .055, stay: .65 }, { p: .42, win: .08, loss: .065, stay: .78 }, { p: .32, win: .06, loss: .08, stay: .9 }] };
+  const strong = S.reference(config, 0), normal = S.reference(config, 1);
+  assert.ok(strong.robust > 0 && strong.robust < strong.practical);
+  assert.equal(normal.robust, 0);
+  close(strong.conservativeP, .55);
+  close(S.maxLoss(config), .6);
+  const withoutMargin = S.generate({ ...config, winRateMargin: 0 });
+  const withMargin = S.generate(config);
+  assert.deepEqual(withoutMargin.map(path => path.events.map(e => e.r)), withMargin.map(path => path.events.map(e => e.r)));
+  assert.deepEqual(S.generate({ ...config, kellyMethod: "distribution" }).map(path => path.events.map(e => e.r)), withMargin.map(path => path.events.map(e => e.r)));
+  assert.ok(withMargin[0].events.every(e => e.estimated === S.reference(config, e.state).robust));
+});
+
+test("a possible total tail loss excludes unlevered full allocation", () => {
+  const config = { ...base, tailProbability: .005, tailLoss: 1 };
+  const ref = S.reference(config);
+  assert.ok(ref.practical < 1);
+  const event = { r: -1, tail: true, estimated: ref.practical, estimatedLoss: ref.loss, state: 1 };
+  const result = S.evaluate(config, [{ events: [event] }]);
+  assert.equal(result.strategies.find(r => r.id === "allin").finals[0], 0);
+  assert.ok(result.strategies.find(r => r.id === "full").finals[0] > 0);
+  assert.equal(result.exampleTailEvents, 1);
+});
+
 test("histogram counts every result including zero and tails", () => {
   const data = S.finalHistogram([0, 50, 80, 100, 120, 150, 300], 100, 4);
   assert.equal(data.zero, 1);

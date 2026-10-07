@@ -36,10 +36,10 @@
         }
       }
     }
-    return { wins, losses };
+    return { wins, losses, tailProbability: config.tailProbability || 0, tailReturn: -(config.tailLoss || 0) };
   }
   function practicalKelly(p, grid) {
-    const derivative = amount => p * grid.wins.reduce((sum, x) => sum + x.weight * x.r / (1 + amount * x.r), 0) + (1 - p) * grid.losses.reduce((sum, x) => sum + x.weight * x.r / (1 + amount * x.r), 0);
+    const derivative = amount => (1 - grid.tailProbability) * (p * grid.wins.reduce((sum, x) => sum + x.weight * x.r / (1 + amount * x.r), 0) + (1 - p) * grid.losses.reduce((sum, x) => sum + x.weight * x.r / (1 + amount * x.r), 0)) + grid.tailProbability * grid.tailReturn / (1 + amount * grid.tailReturn);
     if (derivative(0) <= 0) return 0;
     if (derivative(1 - 1e-12) >= 0) return 1;
     let lo = 0, hi = 1;
@@ -61,13 +61,16 @@
     const gain = state.win - config.cost;
     const loss = state.loss * (1 - config.trailCoverage) + tight * config.trailCoverage + config.slippage / 2 + config.cost;
     const allocation = kelly(p, gain, loss);
-    const practical = practicalKelly(p, outcomeGrid(config, state));
-    const selected = config.kellyMethod === "twoPoint" ? allocation : practical;
-    return { p, gain, loss, b: gain > 0 ? gain / loss : 0, allocation, practical, selected, risk: allocation * loss, posterior };
+    const grid = outcomeGrid(config, state);
+    const practical = practicalKelly(p, grid);
+    const conservativeP = Math.max(0, p - (config.winRateMargin || 0));
+    const robust = practicalKelly(conservativeP, grid);
+    const selected = config.kellyMethod === "twoPoint" ? allocation : config.kellyMethod === "robust" ? robust : practical;
+    return { p, conservativeP, gain, loss, b: gain > 0 ? gain / loss : 0, allocation, practical, robust, selected, risk: allocation * loss, posterior };
   }
   function maxLoss(config) {
     const states = config.mode === "market" ? config.states : [stateParams(config)];
-    return Math.min(1, Math.max(...states.map(s => s.loss * (1 + config.variation) + config.slippage + config.cost)));
+    return Math.min(1, Math.max(config.tailProbability > 0 ? config.tailLoss : 0, ...states.map(s => s.loss * (1 + config.variation) + config.slippage + config.cost)));
   }
   function drawOutcome(config, state, won, random) {
     const variation = 1 + (2 * random() - 1) * config.variation;
@@ -87,8 +90,9 @@
       const events = [];
       for (let i = 0; i < config.trades; i++) {
         const state = stateParams(config, marketState), estimate = refs[config.mode === "market" ? marketState : 0];
-        const won = random() < (config.mode === "market" ? state.p : trueP);
-        events.push({ r: drawOutcome(config, state, won, random), won, state: marketState, estimated: estimate.selected, estimatedLoss: estimate.loss });
+        const tail = config.tailProbability > 0 && random() < config.tailProbability;
+        const won = !tail && random() < (config.mode === "market" ? state.p : trueP);
+        events.push({ r: tail ? -config.tailLoss : drawOutcome(config, state, won, random), won, tail, state: marketState, estimated: estimate.selected, estimatedLoss: estimate.loss });
         if (config.mode === "market" && random() > state.stay) {
           const other = [0, 1, 2].filter(x => x !== marketState);
           marketState = other[random() < .5 ? 0 : 1];
@@ -163,11 +167,11 @@
   function evaluate(config, scenarios) {
     const results = strategies.map(strategy => ({ ...strategy, name: strategy.id === "super" ? `${config.superMultiplier}×凯利` : strategy.name, example: null, finals: [], drawdowns: [], halvings: 0, ruins: 0, clipped: false }));
     const sampleRandom = rng(config.seed + 73471), samples = [];
-    let run = 0, seen = 0, exampleWins = 0, exampleLongestLoss = 0, exampleLossStreak = 0;
+    let run = 0, seen = 0, exampleWins = 0, exampleTailEvents = 0, exampleLongestLoss = 0, exampleLossStreak = 0;
     for (const scenario of scenarios) {
       const states = results.map(() => ({ logWealth: Math.log(config.initial), logPeak: Math.log(config.initial), worst: 0, halved: false, ruined: false, path: run === 0 ? [{ wealth: config.initial, drawdown: 0, r: null, f: 0, risk: 0, state: 1 }] : null }));
       for (const event of scenario.events) {
-        if (run === 0) { if (event.won) { exampleWins++; exampleLossStreak = 0; } else { exampleLossStreak++; exampleLongestLoss = Math.max(exampleLongestLoss, exampleLossStreak); } }
+        if (run === 0) { if (event.tail) exampleTailEvents++; if (event.won) { exampleWins++; exampleLossStreak = 0; } else { exampleLossStreak++; exampleLongestLoss = Math.max(exampleLongestLoss, exampleLossStreak); } }
         seen++;
         if (samples.length < 50000) samples.push(event.r);
         else { const index = Math.floor(sampleRandom() * seen); if (index < samples.length) samples[index] = event.r; }
@@ -182,7 +186,7 @@
           state.worst = Math.max(state.worst, drawdown);
           if (state.logWealth < Math.log(config.initial / 2)) state.halved = true;
           if (state.logWealth > 700) result.clipped = true;
-          if (state.path) state.path.push({ wealth: state.ruined ? 0 : Math.exp(Math.min(state.logWealth, 700)), drawdown, r: event.r, f, risk: f * event.estimatedLoss, state: event.state });
+          if (state.path) state.path.push({ wealth: state.ruined ? 0 : Math.exp(Math.min(state.logWealth, 700)), drawdown, r: event.r, tail: event.tail, f, risk: f * event.estimatedLoss, state: event.state });
         });
       }
       states.forEach((state, i) => {
@@ -202,30 +206,33 @@
       result.halfRate = result.halvings / run; result.ruinRate = result.ruins / run;
     });
     const ref = reference(config);
-    return { strategies: results, cap: config.cap, reference: ref, theoretical: ref.risk, theoreticalAllocation: ref.allocation, exampleWins, exampleLongestLoss, growth: growthCurve(samples), ideal: idealKellyCurve(config, ref) };
+    return { strategies: results, cap: config.cap, reference: ref, theoretical: ref.risk, theoreticalAllocation: ref.allocation, exampleWins, exampleTailEvents, exampleLongestLoss, growth: growthCurve(samples), ideal: idealKellyCurve(config, ref) };
   }
   function simulate(config) { return evaluate(config, scenarioIterator(config)); }
   function sensitivity(config, metric) {
     const ref = reference(config), random = rng(config.seed + 98123), cells = [];
-    const state = stateParams(config, 1), wins = [], losses = [];
+    const state = stateParams(config, 1), grid = outcomeGrid(config, state), wins = [], losses = [];
     for (let i = 0; i < 256; i++) { wins.push(drawOutcome(config, state, true, random)); losses.push(drawOutcome(config, state, false, random)); }
     const pMin = clamp(ref.p - .25, .01, .65), pMax = clamp(ref.p + .25, .35, .99);
     for (let y = 0; y < 11; y++) {
       const actual = pMax - y * (pMax - pMin) / 10, row = [];
       for (let x = 0; x < 11; x++) {
         const estimate = pMin + x * (pMax - pMin) / 10;
-        const amount = Math.min(1, config.cap / ref.loss, config.kellyMethod === "twoPoint" ? kelly(estimate, ref.gain, ref.loss) : practicalKelly(estimate, outcomeGrid(config, state)));
+        const sizingP = config.kellyMethod === "robust" ? Math.max(0, estimate - (config.winRateMargin || 0)) : estimate;
+        const amount = Math.min(1, config.cap / ref.loss, config.kellyMethod === "twoPoint" ? kelly(estimate, ref.gain, ref.loss) : practicalKelly(sizingP, grid));
         if (metric === "growth") {
           const winGrowth = wins.reduce((sum, r) => sum + Math.log1p(amount * r), 0) / wins.length;
           const lossGrowth = losses.reduce((sum, r) => sum + Math.log1p(amount * r), 0) / losses.length;
-          row.push(actual * winGrowth + (1 - actual) * lossGrowth);
+          const tailGrowth = config.tailProbability > 0 ? config.tailProbability * Math.log1p(-amount * config.tailLoss) : 0;
+          row.push((1 - (config.tailProbability || 0)) * (actual * winGrowth + (1 - actual) * lossGrowth) + tailGrowth);
         } else {
           let severe = 0;
           for (let k = 0; k < 48; k++) {
             let logW = 0, logPeak = 0, bad = false;
             for (let t = 0; t < Math.min(config.trades, 300); t++) {
               const source = random() < actual ? wins : losses;
-              logW += Math.log1p(amount * source[Math.floor(random() * source.length)]);
+              const outcome = config.tailProbability > 0 && random() < config.tailProbability ? -config.tailLoss : source[Math.floor(random() * source.length)];
+              logW += Math.log1p(amount * outcome);
               logPeak = Math.max(logPeak, logW);
               if (logW <= logPeak + Math.log(.5)) bad = true;
             }

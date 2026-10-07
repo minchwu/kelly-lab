@@ -114,7 +114,7 @@
     ctx.stroke();
     if (data.ideal) { ctx.strokeStyle = "#52676d"; ctx.lineWidth = 1.8; ctx.setLineDash([7, 4]); ctx.beginPath(); let idealStarted = false; data.ideal.values.forEach(point => { if (!Number.isFinite(point.growth)) { idealStarted = false; return; } idealStarted ? ctx.lineTo(xp(point.allocation), yp(point.growth)) : ctx.moveTo(xp(point.allocation), yp(point.growth)); idealStarted = true; }); ctx.stroke(); ctx.setLineDash([]); }
     if (data.sampleCount) { ctx.fillStyle = "#277e72"; ctx.beginPath(); ctx.arc(xp(data.best.allocation), yp(data.best.growth), 5, 0, Math.PI * 2); ctx.fill(); }
-    if (markers.current !== undefined) { ctx.fillStyle = "#c95752"; ctx.beginPath(); ctx.arc(xp(Math.min(1, markers.current)), yp(data.ideal ? data.ideal.values[Math.round(Math.min(1, markers.current) * 50)].growth : 0), 5, 0, Math.PI * 2); ctx.fill(); }
+    if (markers.current !== undefined) { ctx.strokeStyle = "#b67500"; ctx.lineWidth = 1.5; ctx.setLineDash([7, 3, 2, 3]); ctx.beginPath(); ctx.moveTo(xp(Math.min(1, markers.current)), top); ctx.lineTo(xp(Math.min(1, markers.current)), bottom); ctx.stroke(); ctx.setLineDash([]); }
     text(ctx, "每笔平均对数增长", left, 13, "left");
   }
   function color(value, min, max, metric) {
