@@ -59,14 +59,17 @@ html, body { max-width: 100%; overflow-x: clip; }
 .portfolio-number { display: inline-flex; align-items: center; border: 1px solid var(--line); background: white; height: 28px; }
 .portfolio-number input { width: 53px; min-width: 0; border: 0; padding: 3px 4px; font: inherit; text-align: right; }
 .portfolio-number em { font-style: normal; color: var(--muted); padding-right: 4px; }
-.portfolio-grid { min-width: 890px; }
-.portfolio-grid-head, .portfolio-grid-row { display: grid; grid-template-columns: 75px repeat(8, minmax(85px, 1fr)); align-items: center; gap: 8px; padding: 5px 0; }
+.portfolio-grid { min-width: 1000px; }
+.portfolio-grid-head, .portfolio-grid-row { display: grid; grid-template-columns: 75px repeat(9, minmax(85px, 1fr)); align-items: center; gap: 8px; padding: 5px 0; }
 .portfolio-grid-head { color: var(--muted); font-size: 10px; border-bottom: 1px solid var(--line); }
 .portfolio-grid-row { border-bottom: 1px solid #edf0ef; }
 .portfolio-grid-row:last-child { border-bottom: 0; }
 .portfolio-grid-row label > span:first-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .portfolio-grid-row strong { font-size: 11px; }
 .portfolio-linked { color: var(--muted); font-size: 10px; }
+.portfolio-execution { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 10px; }
+.portfolio-execution h3 { font-size: 12px; margin-bottom: 8px; }
+.portfolio-execution-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 9px 18px; }
 .portfolio-summary-wrap { overflow-x: auto; margin: 14px 0; }
 .portfolio-summary { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 11px; }
 .portfolio-summary th, .portfolio-summary td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: right; }
@@ -78,6 +81,23 @@ html, body { max-width: 100%; overflow-x: clip; }
 .portfolio-allocation-key { color: var(--muted); }
 .portfolio-frame { height: 290px; }
 .portfolio-allocation-frame { height: 165px; }
+.history-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 12px 20px; margin: 12px 0; font-size: 11px; }
+.history-toolbar label { display: grid; gap: 5px; color: var(--muted); font-weight: 600; }
+.history-toolbar input[type="file"] { max-width: 260px; font: inherit; color: var(--ink); }
+.history-number { display: inline-flex; align-items: center; border: 1px solid var(--line); background: white; padding-right: 6px; }
+.history-number input { width: 67px; height: 30px; border: 0; text-align: right; padding: 0 5px; }
+.history-toolbar a { color: #147d69; font-weight: 700; padding-bottom: 6px; }
+.history-schema { font-size: 11px; color: var(--muted); margin: 7px 0 12px; }
+.history-schema summary { cursor: pointer; color: var(--ink); font-weight: 700; }
+.history-schema code { display: block; margin: 7px 0; overflow-x: auto; }
+.history-schema p { max-width: 800px; }
+.history-stats { overflow-x: auto; margin: 12px 0; }
+.history-stats table, .history-summary table { border-collapse: collapse; width: 100%; min-width: 580px; font-size: 11px; }
+.history-stats th, .history-stats td, .history-summary th, .history-summary td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+.history-stats th:first-child, .history-stats td:first-child, .history-summary th:first-child, .history-summary td:first-child { text-align: left; }
+.history-stats th, .history-summary th { color: var(--muted); font-weight: 600; }
+.history-summary { overflow-x: auto; margin: 12px 0; }
+.history-frame { height: 280px; }
 @media (max-width: 1180px) {
   .workspace { grid-template-columns: 268px minmax(0, 1fr); }
 }
@@ -92,6 +112,7 @@ html, body { max-width: 100%; overflow-x: clip; }
   .growth-frame { height: 245px; }
   .portfolio-frame { height: 250px; }
   .portfolio-allocation-frame { height: 150px; }
+  .history-frame { height: 240px; }
   .growth-best { white-space: normal; max-width: 150px; }
   .heat-aside { padding: 10px 0 0 40px; }
   .legend-scale { margin-bottom: 17px; }

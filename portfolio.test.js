@@ -49,3 +49,37 @@ test("signal accuracy changes beliefs but leaves the hidden market returns uncha
   assert.deepEqual(low.map(path => path.events.map(e => [e.state, e.r, e.tail])), high.map(path => path.events.map(e => [e.state, e.r, e.tail])));
   assert.notDeepEqual(low[0].events.map(e => e.probabilities), high[0].events.map(e => e.probabilities));
 });
+
+test("strategy-specific downside ranges reduce scenario growth without changing center inputs", () => {
+  const uncertain = { ...settings, uncertainty: [.1, .08, .06], execution: { fill: .7, entrySlip: .005, exitBlock: .2, gapLoss: .05, hold: [1, 3, 5], rebalanceCost: .001 } };
+  const center = P.scenarios(config, uncertain, [.5, .3, .2]);
+  const adverse = P.scenarios(config, uncertain, P.stressProbabilities([.5, .3, .2], uncertain.ambiguity), true);
+  const weights = [.3, .2, .2];
+  assert.ok(P.growth(weights, adverse) < P.growth(weights, center));
+  assert.ok(Math.abs(center.reduce((sum, row) => sum + row.chance, 0) - 1) < 1e-10);
+  assert.ok(Math.abs(adverse.reduce((sum, row) => sum + row.chance, 0) - 1) < 1e-10);
+});
+
+test("an unfilled board order stays in cash and held positions pay rebalance cost", () => {
+  const model = { ...settings, execution: { fill: 0, entrySlip: 0, exitBlock: 0, gapLoss: 0, rebalanceCost: .01, hold: [1, 3, 1] } };
+  const account = { holdings: [0, 0, 0], remaining: [0, 0, 0] };
+  const first = P.applyTarget(account, [.2, .3, 0], model, false, [-.1, 0, 0]);
+  assert.equal(first.weights[0], 0);
+  assert.ok(Math.abs(first.turnoverCost - .003) < 1e-10);
+  assert.ok(Math.abs(first.wealthFactor - .997) < 1e-10);
+  assert.equal(account.remaining[1], 2);
+  const second = P.applyTarget(account, [0, 0, .3], model, false, [0, 0, 0]);
+  assert.ok(second.weights[1] > .29);
+  assert.equal(account.remaining[1], 1);
+});
+
+test("a ruined portfolio stops trading and keeps zero allocation", () => {
+  const doomed = P.simulate(
+    { ...config, trades: 3, runs: 1, cost: 0, tailProbability: 1, tailLoss: 1 },
+    { ...settings, totalMax: 1, fixed: [1, 0, 0], strategies: settings.strategies.map((strategy, i) => ({ ...strategy, max: 1, tailLoss: i ? strategy.tailLoss : 1 })), execution: { fill: 1, entrySlip: 0, exitBlock: 0, gapLoss: 0, rebalanceCost: 0, hold: [1, 1, 1] } }
+  );
+  const fixed = doomed.results[0];
+  assert.equal(fixed.finals[0], 0);
+  assert.equal(fixed.attempts, 1);
+  assert.deepEqual(fixed.example.slice(2).map(point => point.weights), [[0, 0, 0], [0, 0, 0]]);
+});
